@@ -812,9 +812,27 @@ function renderFeed(){
   if(kw) items=items.filter(i=>i.title.toLowerCase().includes(kw)||i.source.toLowerCase().includes(kw)||(i.desc||'').toLowerCase().includes(kw));
   const el=document.getElementById('feed-list');
   if(!items.length){el.innerHTML=`<div class="empty" style="height:200px;"><span style="color:var(--muted);font-size:11px;">NO ITEMS MATCH FILTER</span></div>`;return;}
-  el.innerHTML=items.map(item=>`<div class="fi" onclick="${item.link?`window.open('${item.link.replace(/'/g,'')}','_blank')`:''}"><div class="fi-top"><div class="fi-title">${item.title}</div>${item.impact?`<span class="fi-imp ${item.impact}">${item.impact.toUpperCase()}</span>`:''}</div><div class="fi-meta"><span class="fi-src">${item.source}</span><span class="fi-tag">${item.league}</span>${item.category?`<span class="fi-tag" style="color:var(--purple);border-color:var(--purple);">${item.category}</span>`:''}<span class="fi-time">${ago(item.pubDate)}</span></div>${item.desc?`<div class="fi-desc">${item.desc.substring(0,120)}${item.desc.length>120?'...':''}</div>`:''}${item.reason?`<div class="fi-reason">${item.reason}</div>`:''}</div>`).join('');
+  el.innerHTML=items.map(item=>`<div class="fi" onclick="${item.link?`window.open('${item.link.replace(/'/g,'')}','_blank')`:''}">
+    <div class="fi-top"><div class="fi-title">${item.title}</div>${item.impact?`<span class="fi-imp ${item.impact}">${item.impact.toUpperCase()}</span>`:''}</div>
+    <div class="fi-meta"><span class="fi-src">${item.source}</span><span class="fi-tag">${item.league}</span>${item.category?`<span class="fi-tag" style="color:var(--purple);border-color:var(--purple);">${item.category}</span>`:''}<span class="fi-time">${ago(item.pubDate)}</span></div>
+    ${item.desc?`<div class="fi-desc">${item.desc.substring(0,120)}${item.desc.length>120?'...':''}</div>`:''}
+    ${item.reason?`<div class="fi-reason">${item.reason}</div>`:''}
+    <div style="margin-top:6px;"><button onclick="event.stopPropagation();feedToChat('${(item.title||'').replace(/'/g,'').replace(/"/g,'').substring(0,80)}','${item.source||''}')" style="font-size:9px;padding:2px 8px;border:1px solid var(--purple);color:var(--purple);background:transparent;cursor:pointer;font-family:var(--font);">ASK AI ↗</button></div>
+  </div>`).join('');
 }
-function startFeedPoll(){ stopFeedPoll(); feedPollTimer=setInterval(()=>loadFeed(),60000); }
+function feedToChat(title, source){
+  // Switch to F6 intelligence tab
+  showPanel('intel', document.querySelectorAll('.fkey')[5]);
+  switchIntelTab('chat', document.getElementById('itab-chat'));
+  // Pre-fill the chat with context from the feed item
+  const input=document.getElementById('chat-input');
+  input.value=`This just came through the feed from ${source||'a source'}: "${title}" — what does this mean for ticket prices and inventory? Check upcoming events and related feed items.`;
+  input.focus();
+  // Scroll to bottom of chat
+  const chatEl=document.getElementById('chat-messages');
+  chatEl.scrollTop=chatEl.scrollHeight;
+  toast('FEED ITEM SENT TO CHAT');
+}
 function stopFeedPoll(){ if(feedPollTimer){clearInterval(feedPollTimer);feedPollTimer=null;} }
 
 async function createRSSFeed(){
@@ -974,22 +992,26 @@ function appendEventCards(events, listingsFound){
     const avail=ev.available_count||0;
     const availColor=avail>200?'var(--green)':avail>50?'var(--amber)':avail>0?'var(--rss)':'var(--muted)';
 
-    // KPI movement from tracked history
+    // KPI movement from tracked history — guard against bad snapshot values
     let kpiHtml='';
     if(isTracked){
       const tKey=Object.keys(tracked).find(k=>String(tracked[k].event_id)===String(ev.id));
       const tev=tKey?tracked[tKey]:null;
       if(tev&&tev.history&&tev.history.length){
-        const lat=tev.history[tev.history.length-1];
-        const prev=tev.history.length>1?tev.history[tev.history.length-2]:null;
-        const fd=prev?lat.floor-prev.floor:null;
-        const cd=prev?lat.count-prev.count:null;
-        kpiHtml=`<div style="display:flex;gap:10px;padding:5px 0;border-top:1px solid var(--border);margin-top:4px;flex-wrap:wrap;">
-          <span style="font-size:10px;"><span style="color:var(--muted);">FLOOR </span><span style="color:var(--cyan);">$${lat.floor}</span>${fd!==null?` <span style="${fd>0?'color:var(--red)':'color:var(--green)'}">${fd>0?'▲':'▼'}$${Math.abs(fd)}</span>`:''}</span>
-          <span style="font-size:10px;"><span style="color:var(--muted);">AVG </span><span style="color:var(--amber);">$${lat.avg}</span></span>
-          <span style="font-size:10px;"><span style="color:var(--muted);">LST </span><span style="color:#A5D6A7;">${(lat.count||0).toLocaleString()}</span>${cd!==null?` <span style="${cd<0?'color:var(--red)':'color:var(--green)'}">${cd>0?'+':''}${cd}</span>`:''}</span>
-          <span style="font-size:9px;color:var(--muted);margin-left:auto;">${tev.history.length} snaps</span>
-        </div>`;
+        // Find most recent snapshot with valid floor > 0
+        const validSnaps=tev.history.filter(s=>s.floor>0&&s.avg>0);
+        if(validSnaps.length){
+          const lat=validSnaps[validSnaps.length-1];
+          const prev=validSnaps.length>1?validSnaps[validSnaps.length-2]:null;
+          const fd=prev?lat.floor-prev.floor:null;
+          const cd=prev?lat.count-prev.count:null;
+          kpiHtml=`<div style="display:flex;gap:10px;padding:5px 0;border-top:1px solid var(--border);margin-top:4px;flex-wrap:wrap;">
+            <span style="font-size:10px;"><span style="color:var(--muted);">FLOOR </span><span style="color:var(--cyan);">$${lat.floor}</span>${fd!==null?` <span style="${fd>0?'color:var(--red)':'color:var(--green)'}">${fd>0?'▲':'▼'}$${Math.abs(fd)}</span>`:''}</span>
+            <span style="font-size:10px;"><span style="color:var(--muted);">AVG </span><span style="color:var(--amber);">$${lat.avg}</span></span>
+            <span style="font-size:10px;"><span style="color:var(--muted);">LST </span><span style="color:#A5D6A7;">${(lat.count||0).toLocaleString()}</span>${cd!==null?` <span style="${cd<0?'color:var(--red)':'color:var(--green)'}">${cd>0?'+':''}${cd}</span>`:''}</span>
+            <span style="font-size:9px;color:var(--muted);margin-left:auto;">${validSnaps.length} snaps</span>
+          </div>`;
+        }
       }
     }
 
@@ -997,9 +1019,14 @@ function appendEventCards(events, listingsFound){
     const feedTerms=[ev.name, ev.performer, ev.venue]
       .flatMap(s=>(s||'').toLowerCase().split(/\s+at\s+|\s+vs\.?\s+|\s+@\s+/))
       .map(s=>s.replace(/[^\w\s]/g,'').trim())
-      .filter(s=>s.length>3);
+      .filter(s=>s.length>=3);
     const feedMatches=allFeedItems.filter(item=>{
-      const text=((item.title||item.item_title||'')+' '+(item.desc||item.item_description||'')).toLowerCase();
+      // Search title, description, and source name — catches "Lakers / Twitter" style feeds
+      const text=[
+        item.title||item.item_title||'',
+        item.desc||item.item_description||'',
+        item.source||item.feed_title||''
+      ].join(' ').toLowerCase();
       return feedTerms.some(t=>text.includes(t));
     }).slice(0,3);
 

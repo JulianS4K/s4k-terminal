@@ -565,7 +565,13 @@ function updateSrcBar(c){
   else              st('tag-rss','ntk','NEEDS KEY');
 }
 async function gasGet(p){ const c=getCreds(); if(!c.gas) throw new Error('GAS URL not set'); const r=await fetch(`${c.gas}?${new URLSearchParams(p)}`); if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }
-async function gasPost(b){ const c=getCreds(); if(!c.gas) throw new Error('GAS URL not set'); const r=await fetch(c.gas,{method:'POST',body:JSON.stringify(b)}); if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }
+async function gasPost(b){
+  const c=getCreds(); if(!c.gas) throw new Error('GAS URL not set');
+  // text/plain avoids CORS preflight — GAS still receives body via e.postData.contents
+  const r=await fetch(c.gas,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(b)});
+  if(!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
 async function testConn(){
   const box=document.getElementById('conn-box'); box.style.display='block'; box.className='connbox'; box.textContent='TESTING...';
   try{
@@ -590,7 +596,7 @@ function dayOfWeek(d){ if(!d)return''; return['Sun','Mon','Tue','Wed','Thu','Fri
 function fmt(n){ return n>=1000?'$'+Number(n).toLocaleString():'$'+n; }
 function fmtC(n){ return Number(n).toLocaleString(); }
 function dHtml(n,isC){ if(!n||n===0)return'<span style="color:var(--muted)">—</span>'; const a=Math.abs(n),s=isC?a.toLocaleString():'$'+a.toLocaleString(); return n>0?`<span class="dup">▲ ${s}</span>`:`<span class="ddn">▼ ${s}</span>`; }
-function skey(src,v,p){ return`${src}::${(v||'').replace(/[^\w]/g,'_').substring(0,30)}::${(p||'').replace(/[^\w]/g,'_').substring(0,30)}`; }
+function skey(src,v,p,eid){ return`${src}::${(v||'').replace(/[^\w]/g,'_').substring(0,30)}::${(p||'').replace(/[^\w]/g,'_').substring(0,30)}::${eid||''}`.replace(/::$/,''); }
 function ago(ds){ const d=new Date(ds),m=Math.round((Date.now()-d)/60000); if(m<1)return'just now'; if(m<60)return`${m}m ago`; if(m<1440)return`${Math.round(m/60)}h ago`; return`${Math.round(m/1440)}d ago`; }
 
 // ================================================================
@@ -609,7 +615,7 @@ async function loadHistory(key){
   catch(e){ ev.history=[]; }
 }
 async function saveSnap(src,venue,perf,eid,name,date,stats){
-  const key=skey(src,venue,perf);
+  const key=skey(src,venue,perf,eid);
   const ev=tracked[key]||{key,src,event_id:eid,name,venue,performer:perf,date,added_at:new Date().toISOString(),history:[]};
   const prev=ev.history.length?ev.history[ev.history.length-1]:null;
   const du=daysUntil(date);
@@ -994,7 +1000,7 @@ async function trackFromChat(eid){
     const performerId = ev.performer ? 'p_'+ev.performer.replace(/[^\w]/g,'_').substring(0,30).toLowerCase() : '';
 
     const evRecord = {
-      key:          skey('TE', ev.venue||'', ev.performer||''),
+      key:          skey('TE', ev.venue||'', ev.performer||'', String(ev.id)),
       src:          'TE',
       event_id:     String(ev.id),
       name:         ev.name||'',
@@ -1087,7 +1093,7 @@ async function fetchChatListings(eid){
       if(btn){ btn.textContent='PRICES SHOWN'; btn.style.opacity='0.4'; }
 
       // Auto-save snapshot if tracked
-      const key = skey('TE', ev.venue||'', ev.performer||'');
+      const key = skey('TE', ev.venue||'', ev.performer||'', eid);
       if(tracked[key]) saveSnap('TE',ev.venue||'',ev.performer||'',eid,ev.name||'',ev.date||ev.date_local||'',s);
       return;
     }
@@ -1109,8 +1115,8 @@ async function fetchChatListings(eid){
       );
       if(btn){ btn.textContent='STATS SHOWN'; btn.style.opacity='0.4'; }
 
-      // Save stats-based snapshot — flagged as source:stats
-      const key = skey('TE', ev.venue||'', ev.performer||'');
+      // Save stats-based snapshot
+      const key = skey('TE', ev.venue||'', ev.performer||'', eid);
       if(tracked[key]) saveSnap('TE',ev.venue||'',ev.performer||'',eid,ev.name||'',ev.date||ev.date_local||'',st);
     } else {
       // Both endpoints returned nothing

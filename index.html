@@ -8,13 +8,24 @@
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;}
-:root{--bg:#080C0A;--bg2:#0E1410;--bg3:#141C16;--amber:#FFB300;--amber2:#FF8C00;--green:#00E676;--red:#FF1744;--cyan:#00E5FF;--purple:#CE93D8;--white:#E8F0E8;--muted:#5A7A60;--border:#1E2E22;--sg:#4FC3F7;--sg-bg:rgba(79,195,247,0.08);--sg-bd:rgba(79,195,247,0.3);--te:#A5D6A7;--te-bg:rgba(165,214,167,0.08);--te-bd:rgba(165,214,167,0.3);--rss:#FF6B35;--font:'IBM Plex Mono','Courier New',monospace;}
+:root{
+  --bg:#080C0A;--bg2:#0E1410;--bg3:#141C16;
+  --amber:#FFB300;--amber2:#FF8C00;
+  --green:#00E676;--red:#FF1744;--cyan:#00E5FF;--purple:#CE93D8;
+  --white:#E8F0E8;--muted:#5A7A60;--border:#1E2E22;
+  --sg:#4FC3F7;--sg-bg:rgba(79,195,247,0.08);--sg-bd:rgba(79,195,247,0.3);
+  --te:#A5D6A7;--te-bg:rgba(165,214,167,0.08);--te-bd:rgba(165,214,167,0.3);
+  --rss:#FF6B35;
+  --font:'IBM Plex Mono','Courier New',monospace;
+}
 html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--font);font-size:12px;}
 .terminal{display:flex;flex-direction:column;height:100vh;}
+
+/* ── Bars ── */
 .topbar{background:var(--amber);color:#000;padding:3px 10px;display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:600;letter-spacing:0.05em;flex-shrink:0;}
 .statusbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:2px 10px;display:flex;align-items:center;overflow-x:auto;flex-shrink:0;}
 .statusbar::-webkit-scrollbar{display:none;}
-.fkey{font-size:10px;padding:2px 8px;border-right:1px solid var(--border);cursor:pointer;color:var(--muted);white-space:nowrap;}
+.fkey{font-size:10px;padding:2px 8px;border-right:1px solid var(--border);cursor:pointer;color:var(--muted);white-space:nowrap;user-select:none;}
 .fkey span{color:var(--amber);margin-right:4px;}
 .fkey:hover,.fkey.active{background:var(--bg3);color:var(--white);}
 .source-bar{display:flex;align-items:stretch;border-bottom:1px solid var(--border);font-size:10px;overflow-x:auto;flex-shrink:0;}
@@ -26,12 +37,19 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 .stag.cfg{border:1px solid var(--amber);color:var(--amber);}
 .stag.soon{border:1px solid var(--muted);color:var(--muted);}
 .stag.ntk{border:1px solid var(--rss);color:var(--rss);}
+
+/* ── Layout ── */
 .main{display:flex;flex:1;overflow:hidden;}
 .sidebar{width:260px;flex-shrink:0;border-right:1px solid var(--border);display:flex;flex-direction:column;}
 .sbh{padding:6px 10px;border-bottom:1px solid var(--border);color:var(--amber);font-size:10px;letter-spacing:0.1em;display:flex;justify-content:space-between;}
 .sbl{flex:1;overflow-y:auto;}
 .sbl::-webkit-scrollbar{width:3px;}
 .sbl::-webkit-scrollbar-thumb{background:var(--border);}
+.content{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.panel{display:none;flex-direction:column;flex:1;overflow:hidden;}
+.panel.active{display:flex;}
+
+/* ── Event rows ── */
 .er{padding:7px 10px;border-bottom:1px solid var(--border);cursor:pointer;border-left:2px solid transparent;}
 .er:hover,.er.active{background:var(--bg3);}
 .er.src-sg{border-left-color:var(--sg);}
@@ -47,21 +65,26 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 .sct{font-size:9px;background:var(--bg3);border:1px solid var(--border);padding:1px 5px;color:var(--muted);}
 .elst{font-size:9px;color:var(--muted);margin-left:auto;}
 .elst span{color:var(--purple);}
-.content{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+
+/* ── Banners ── */
 .banner{padding:4px 12px;font-size:10px;letter-spacing:0.07em;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);flex-shrink:0;}
 .banner.sg{background:var(--sg-bg);border-bottom-color:var(--sg-bd);}
 .banner.te{background:var(--te-bg);border-bottom-color:var(--te-bd);}
 .banner.rss{background:rgba(255,107,53,0.08);border-bottom-color:rgba(255,107,53,0.3);}
+.banner.intel{background:rgba(179,157,219,0.08);border-bottom-color:rgba(179,157,219,0.3);}
 .banner.none{background:var(--bg3);}
-.bdot{width:8px;height:8px;border-radius:50%;}
-.bdot.sg{background:var(--sg);}.bdot.te{background:var(--te);}.bdot.rss{background:var(--rss);}
+.bdot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
 .blbl{font-weight:600;}
-.blbl.sg{color:var(--sg);}.blbl.te{color:var(--te);}.blbl.rss{color:var(--rss);}
+.blbl.sg{color:var(--sg);}.blbl.te{color:var(--te);}.blbl.rss{color:var(--rss);}.blbl.intel{color:#B39DDB;}
 .bmeta{color:var(--muted);}
-.chmain{background:var(--bg2);padding:6px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);flex-shrink:0;}
+
+/* ── Content header ── */
+.chmain{background:var(--bg2);padding:6px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);flex-shrink:0;gap:8px;flex-wrap:wrap;}
 .cht{font-size:13px;color:var(--amber);font-weight:500;letter-spacing:0.05em;}
 .chm{font-size:10px;color:var(--muted);}
 .chact{display:flex;gap:6px;flex-wrap:wrap;}
+
+/* ── Buttons ── */
 .tmbtn{font-size:10px;padding:3px 10px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:var(--font);letter-spacing:0.05em;transition:all 0.1s;}
 .tmbtn:hover{border-color:var(--amber);color:var(--amber);}
 .tmbtn.pri{border-color:var(--amber2);color:var(--amber2);}
@@ -69,7 +92,10 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 .tmbtn.rpri{border-color:var(--rss);color:var(--rss);}
 .tmbtn.rpri:hover{background:var(--rss);color:#000;}
 .tmbtn.apri{border-color:#B39DDB;color:#B39DDB;}
+.tmbtn.apri:hover{background:#B39DDB;color:#000;}
 .tmbtn:disabled{opacity:0.3;cursor:default;}
+
+/* ── Metrics strip ── */
 .mstrip{display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid var(--border);flex-shrink:0;}
 .mc{padding:8px 10px;border-right:1px solid var(--border);background:var(--bg);}
 .mc:last-child{border-right:none;}
@@ -77,6 +103,8 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 .mcval{font-size:18px;font-weight:500;margin-top:2px;}
 .mcd{font-size:10px;margin-top:1px;min-height:14px;}
 .vf{color:var(--cyan);}.va{color:var(--amber);}.vm{color:var(--purple);}.vx{color:var(--red);}.vc{color:#A5D6A7;}
+
+/* ── Chart ── */
 .chart-area{flex:1;padding:12px;background:var(--bg);display:flex;flex-direction:column;overflow:hidden;}
 .ctop{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-shrink:0;flex-wrap:wrap;gap:6px;}
 .clbl{font-size:9px;color:var(--muted);letter-spacing:0.1em;}
@@ -93,10 +121,14 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 .ctab:first-child{border-right:none;}
 .ctab.active{border-color:var(--amber);color:var(--amber);background:var(--bg3);}
 .cwrap{flex:1;position:relative;min-height:0;}
-.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted);gap:8px;font-size:11px;}
+.snapinfo{background:var(--bg2);border-top:1px solid var(--border);padding:6px 12px;display:none;justify-content:space-between;font-size:10px;color:var(--muted);flex-shrink:0;}
+
+/* ── Empty + blink ── */
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted);gap:8px;font-size:11px;text-align:center;padding:20px;}
 .blink{animation:blink 1s step-end infinite;}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
-.snapinfo{background:var(--bg2);border-top:1px solid var(--border);padding:6px 12px;display:none;justify-content:space-between;font-size:10px;color:var(--muted);flex-shrink:0;}
+
+/* ── Botbar + toast ── */
 .botbar{background:var(--bg2);border-top:1px solid var(--border);padding:3px 10px;display:flex;align-items:center;justify-content:space-between;font-size:10px;color:var(--muted);flex-shrink:0;}
 .sdot2{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;margin-right:5px;animation:pulse 2s infinite;}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
@@ -104,27 +136,30 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 .toast.ok{background:#0D2010;border-color:var(--green);color:var(--green);}
 .toast.err{background:#200808;border-color:var(--red);color:var(--red);}
 .toast.inf{background:#0A0E1A;border-color:var(--amber);color:var(--amber);}
-.panel{display:none;flex-direction:column;flex:1;overflow:hidden;}
-.panel.active{display:flex;}
+
+/* ── Forms ── */
 .pbody{padding:16px;overflow-y:auto;flex:1;}
+.pbody::-webkit-scrollbar{width:3px;}
+.pbody::-webkit-scrollbar-thumb{background:var(--border);}
 .ifield{display:flex;flex-direction:column;gap:3px;margin-bottom:12px;}
 .ilbl{font-size:9px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;}
-.tminput{font-family:var(--font);font-size:12px;padding:6px 8px;background:var(--bg);border:1px solid var(--border);color:var(--white);width:100%;max-width:420px;outline:none;transition:border 0.1s;}
+.tminput{font-family:var(--font);font-size:12px;padding:6px 8px;background:var(--bg);border:1px solid var(--border);color:var(--white);width:100%;outline:none;transition:border 0.1s;}
 .tminput:focus{border-color:var(--amber);}
 .tminput::placeholder{color:var(--muted);}
-.tmsel{font-family:var(--font);font-size:12px;padding:6px 8px;background:var(--bg);border:1px solid var(--border);color:var(--white);outline:none;width:100%;max-width:420px;}
+.tmsel{font-family:var(--font);font-size:12px;padding:6px 8px;background:var(--bg);border:1px solid var(--border);color:var(--white);outline:none;width:100%;}
 .sectitle{color:var(--amber);font-size:10px;letter-spacing:0.1em;margin-bottom:10px;margin-top:16px;border-bottom:1px solid var(--border);padding-bottom:4px;display:flex;align-items:center;gap:8px;}
 .sectitle:first-child{margin-top:0;}
-.dropdown{background:var(--bg2);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;max-width:420px;position:absolute;z-index:10;width:100%;}
+.connbox{font-size:11px;padding:6px 10px;border:1px solid var(--border);background:var(--bg3);margin-bottom:12px;}
+.connbox.ok{border-color:var(--green);color:var(--green);}
+.connbox.err{border-color:var(--red);color:var(--red);}
+.dropdown{background:var(--bg2);border:1px solid var(--border);border-top:none;max-height:200px;overflow-y:auto;position:absolute;z-index:10;width:100%;max-width:420px;}
 .ddi{padding:7px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:11px;}
 .ddi:hover{background:var(--bg3);}
 .ddn2{color:var(--white);}.ddm{color:var(--muted);font-size:10px;}
-.connbox{font-size:11px;padding:6px 10px;border:1px solid var(--border);background:var(--bg3);margin-bottom:12px;max-width:100%;}
-.connbox.ok{border-color:var(--green);color:var(--green);}
-.connbox.err{border-color:var(--red);color:var(--red);}
-/* F4 Feed */
+
+/* ── F4 Feed ── */
 .feed-bar{display:flex;gap:8px;align-items:center;padding:7px 12px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg2);flex-wrap:wrap;}
-.fpill{font-size:10px;padding:2px 10px;border:1px solid var(--border);cursor:pointer;color:var(--muted);border-radius:2px;font-family:var(--font);}
+.fpill{font-size:10px;padding:2px 10px;border:1px solid var(--border);cursor:pointer;color:var(--muted);border-radius:2px;font-family:var(--font);user-select:none;}
 .fpill.active{border-color:var(--amber);color:var(--amber);background:var(--bg3);}
 .fsearch{font-family:var(--font);font-size:11px;padding:3px 8px;background:var(--bg);border:1px solid var(--border);color:var(--white);outline:none;width:150px;}
 .fsearch:focus{border-color:var(--amber);}
@@ -146,17 +181,14 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 .fi-desc{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.4;}
 .fi-reason{font-size:10px;color:var(--amber);margin-top:3px;}
 .src-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:11px;}
-.src-name{color:var(--white);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px;}
-.src-league{font-size:10px;color:var(--muted);}
-.src-status{font-size:9px;padding:1px 6px;border:1px solid;border-radius:2px;}
-.src-status.on{border-color:var(--green);color:var(--green);}
-.src-status.off{border-color:var(--muted);color:var(--muted);}
-.src-del{font-size:10px;padding:2px 7px;border:1px solid var(--red);color:var(--red);background:transparent;cursor:pointer;font-family:var(--font);}
-/* F5 Theme */
+.src-name{color:var(--white);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.src-del{font-size:10px;padding:2px 7px;border:1px solid var(--red);color:var(--red);background:transparent;cursor:pointer;font-family:var(--font);flex-shrink:0;}
+
+/* ── F5 Theme ── */
 .theme-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;}
 .theme-card{border:1px solid var(--border);border-radius:4px;padding:10px 8px;cursor:pointer;text-align:center;font-size:10px;transition:all 0.15s;}
-.theme-card:hover{border-color:var(--amber);}
-.theme-card.active{border-color:var(--amber);border-width:2px;}
+.theme-card:hover,.theme-card.active{border-color:var(--amber);}
+.theme-card.active{border-width:2px;}
 .theme-preview{width:100%;height:28px;border-radius:2px;margin-bottom:6px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600;letter-spacing:0.1em;}
 .color-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
 .color-label{font-size:10px;color:var(--muted);width:110px;flex-shrink:0;}
@@ -168,14 +200,15 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 .cur-card{border:1px solid var(--border);border-radius:4px;padding:8px 6px;cursor:pointer;text-align:center;font-size:10px;transition:all 0.15s;}
 .cur-card:hover,.cur-card.active{border-color:var(--amber);}
 @keyframes marquee{from{transform:translateX(0)}to{transform:translateX(-100%)}}
-/* F6 Intelligence */
+
+/* ── F6 Intelligence ── */
 .intel-tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg2);}
-.itab{font-size:10px;padding:6px 16px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;font-family:var(--font);letter-spacing:0.05em;}
+.itab{font-size:10px;padding:6px 16px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;font-family:var(--font);letter-spacing:0.05em;user-select:none;}
 .itab.active{color:var(--amber);border-bottom-color:var(--amber);}
 .itab:hover:not(.active){color:var(--white);}
 .intel-panel{display:none;flex-direction:column;flex:1;overflow:hidden;}
 .intel-panel.active{display:flex;}
-/* Feed cards */
+.intel-toolbar{padding:6px 12px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-shrink:0;background:var(--bg2);flex-wrap:wrap;align-items:center;}
 .icard{padding:12px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.1s;}
 .icard:hover{background:var(--bg3);}
 .icard.type-alert{border-left:3px solid var(--red);}
@@ -190,74 +223,92 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 .isev{font-size:9px;padding:1px 6px;border:1px solid;border-radius:2px;}
 .isev.high{color:var(--red);border-color:var(--red);background:rgba(255,23,68,0.08);}
 .isev.medium{color:var(--amber);border-color:var(--amber);background:rgba(255,179,0,0.08);}
-.isev.low{color:var(--green);border-color:var(--green);background:rgba(0,230,118,0.08);}
-.isev.info{color:var(--muted);border-color:var(--muted);}
+.isev.low,.isev.info{color:var(--muted);border-color:var(--muted);}
 .icard-title{font-size:12px;color:var(--white);font-weight:500;margin:4px 0;line-height:1.4;}
-.icard-body{font-size:11px;color:var(--muted);line-height:1.5;margin-top:4px;}
-.icard-body.expanded{max-height:none;}
-.icard-body.collapsed{max-height:60px;overflow:hidden;}
-.icard-meta{display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;}
+.icard-body{font-size:11px;color:var(--muted);line-height:1.5;margin-top:4px;max-height:60px;overflow:hidden;transition:max-height 0.2s;}
+.icard-body.open{max-height:600px;}
 .icard-time{font-size:10px;color:var(--muted);margin-left:auto;}
 .icard-actions{display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);}
 .iact{font-size:10px;padding:2px 8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:var(--font);}
 .iact:hover{border-color:var(--amber);color:var(--amber);}
 .iact.saved{border-color:var(--amber);color:var(--amber);}
-/* Chat */
+.unread-badge{font-size:9px;padding:1px 6px;background:var(--red);color:#fff;border-radius:99px;margin-left:4px;}
+
+/* ── Chat ── */
 .chat-list{flex:1;overflow-y:auto;padding:12px;}
 .chat-list::-webkit-scrollbar{width:3px;}
 .chat-list::-webkit-scrollbar-thumb{background:var(--border);}
 .cmsg{margin-bottom:12px;}
-.cmsg.user .cbubble{background:var(--bg3);border:1px solid var(--border);color:var(--white);margin-left:40px;}
-.cmsg.ai .cbubble{background:var(--bg2);border:1px solid var(--border);color:var(--white);margin-right:40px;}
-.cbubble{padding:10px 12px;border-radius:4px;font-size:12px;line-height:1.6;}
+.cmsg.user .cbubble{background:var(--bg3);border:1px solid var(--border);margin-left:40px;}
+.cmsg.ai .cbubble{background:var(--bg2);border:1px solid var(--border);margin-right:40px;}
+.cbubble{padding:10px 12px;border-radius:4px;font-size:12px;line-height:1.6;color:var(--white);}
 .cmsg-label{font-size:9px;color:var(--muted);margin-bottom:3px;letter-spacing:0.1em;}
 .cmsg.user .cmsg-label{text-align:right;}
 .chat-input-wrap{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--border);flex-shrink:0;background:var(--bg2);}
 .chat-input{flex:1;font-family:var(--font);font-size:12px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);color:var(--white);outline:none;resize:none;height:60px;}
 .chat-input:focus{border-color:var(--amber);}
 .chat-input::placeholder{color:var(--muted);}
-.intel-toolbar{padding:6px 12px;border-bottom:1px solid var(--border);display:flex;gap:8px;flex-shrink:0;background:var(--bg2);flex-wrap:wrap;align-items:center;}
-.unread-badge{font-size:9px;padding:1px 6px;background:var(--red);color:#fff;border-radius:99px;margin-left:4px;}
+.chat-tool-hint{font-size:10px;color:var(--muted);padding:2px 0 6px;font-style:italic;}
+
+/* ── TEvo event cards in chat ── */
+.te-event-card{background:var(--bg3);border:1px solid rgba(165,214,167,0.3);border-left:3px solid var(--te);padding:10px 12px;margin:4px 0;border-radius:2px;}
+.te-event-name{font-size:12px;color:var(--white);font-weight:500;margin-bottom:3px;line-height:1.3;}
+.te-event-meta{font-size:10px;color:var(--muted);margin-bottom:6px;display:flex;gap:12px;flex-wrap:wrap;}
+.te-event-stats{display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap;}
+.te-stat span:first-child{color:var(--muted);margin-right:3px;font-size:10px;}
+.te-stat span:last-child{font-size:11px;}
+.te-card-btns{display:flex;gap:6px;}
+.te-btn{font-size:10px;padding:3px 10px;border:1px solid;background:transparent;cursor:pointer;font-family:var(--font);}
+.te-btn.track{border-color:var(--te);color:var(--te);}
+.te-btn.track:hover{background:var(--te);color:#000;}
+.te-btn.track.done{border-color:var(--green);color:var(--green);cursor:default;}
+.te-btn.prices{border-color:var(--muted);color:var(--muted);}
+.te-btn.prices:hover{border-color:var(--amber);color:var(--amber);}
 </style>
+</head>
 <body>
 <div class="terminal">
+
 <div class="topbar">
-  <span style="font-size:13px;font-weight:600;letter-spacing:0.1em;">S4K TERMINAL <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v2.0</span></span>
+  <span id="term-title" style="font-size:13px;font-weight:600;letter-spacing:0.1em;">S4K TERMINAL <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.0</span></span>
   <div style="display:flex;gap:16px;"><span id="clock"></span><span>NYC</span></div>
 </div>
+
 <div class="statusbar">
-  <div class="fkey active" onclick="showPanel('detail',this)"><span>F1</span>TRACKED</div>
+  <div class="fkey" onclick="showPanel('detail',this)"><span>F1</span>TRACKED</div>
   <div class="fkey" onclick="showPanel('addsg',this)"><span>F2</span>ADD SEATGEEK</div>
   <div class="fkey" onclick="showPanel('addtevo',this)"><span>F3</span>ADD TEVO</div>
   <div class="fkey" onclick="showPanel('feed',this)"><span>F4</span>FEED</div>
   <div class="fkey" onclick="showPanel('theme',this)"><span>F5</span>THEME</div>
-  <div class="fkey" onclick="showPanel('intel',this)"><span>F6</span>INTELLIGENCE</div>
+  <div class="fkey active" onclick="showPanel('intel',this)"><span>F6</span>INTELLIGENCE</div>
   <div class="fkey" onclick="showPanel('creds',this)"><span>F8</span>SETTINGS</div>
   <div class="fkey" onclick="refreshAll(this)" style="margin-left:auto;"><span>F9</span>REFRESH ALL</div>
 </div>
+
 <div class="source-bar">
   <div class="si"><div class="sdot" style="background:var(--sg);"></div><span style="color:var(--white);">SEATGEEK</span><span style="color:var(--muted);">via GAS</span><span class="stag cfg" id="tag-sg">NEEDS KEY</span></div>
   <div class="si"><div class="sdot" style="background:var(--te);"></div><span style="color:var(--white);">TICKET EVO</span><span style="color:var(--muted);">via GAS</span><span class="stag cfg" id="tag-te">NEEDS KEY</span></div>
-  <div class="si"><div class="sdot" style="background:#FBBC04;"></div><span style="color:var(--white);">GAS</span><span style="color:var(--muted);">API proxy</span><span class="stag cfg" id="tag-gas">NEEDS URL</span></div>
-  <div class="si"><div class="sdot" style="background:#34A853;"></div><span style="color:var(--white);">SHEETS</span><span style="color:var(--muted);">S4K Terminal Data</span><span class="stag cfg" id="tag-sheets">PENDING</span></div>
-  <div class="si"><div class="sdot" style="background:#B39DDB;"></div><span style="color:var(--white);">ANTHROPIC</span><span style="color:var(--muted);">AI scoring</span><span class="stag cfg" id="tag-anth">NEEDS KEY</span></div>
-  <div class="si"><div class="sdot" style="background:var(--rss);"></div><span style="color:var(--white);">RSS/TWITTER</span><span style="color:var(--muted);">rss.app + feeds</span><span class="stag ntk" id="tag-rss">NEEDS TOKEN</span></div>
-  <div class="si" style="opacity:0.45;"><div class="sdot" style="background:var(--muted);opacity:0.4;"></div><span style="color:var(--muted);">REDDIT</span><span class="stag soon">NEEDS TOKEN</span></div>
-  <div class="si" style="opacity:0.45;"><div class="sdot" style="background:var(--muted);opacity:0.4;"></div><span style="color:var(--muted);">SG BROKER SALES</span><span class="stag soon">TOKEN PENDING</span></div>
+  <div class="si"><div class="sdot" style="background:#FBBC04;"></div><span style="color:var(--white);">GAS</span><span style="color:var(--muted);">proxy</span><span class="stag cfg" id="tag-gas">NEEDS URL</span></div>
+  <div class="si"><div class="sdot" style="background:#34A853;"></div><span style="color:var(--white);">SHEETS</span><span style="color:var(--muted);">S4K data</span><span class="stag cfg" id="tag-sheets">PENDING</span></div>
+  <div class="si"><div class="sdot" style="background:#B39DDB;"></div><span style="color:var(--white);">ANTHROPIC</span><span style="color:var(--muted);">AI + chat</span><span class="stag cfg" id="tag-anth">NEEDS KEY</span></div>
+  <div class="si"><div class="sdot" style="background:var(--rss);"></div><span style="color:var(--white);">RSS.APP</span><span style="color:var(--muted);">webhook push</span><span class="stag ntk" id="tag-rss">NEEDS KEY</span></div>
+  <div class="si" style="opacity:0.4;"><div class="sdot" style="background:var(--muted);"></div><span style="color:var(--muted);">SG BROKER SALES</span><span class="stag soon">TOKEN PENDING</span></div>
 </div>
+
 <div class="main">
   <div class="sidebar">
     <div class="sbh"><span>TRACKED EVENTS</span><span id="tcount" style="color:var(--white);">0</span></div>
     <div class="sbl" id="sbl"><div style="padding:12px;color:var(--muted);font-size:10px;">NO EVENTS TRACKED<br><br>F2 SEATGEEK · F3 TEVO</div></div>
   </div>
+
   <div class="content">
     <div id="toast" class="toast"></div>
 
-    <!-- F1 -->
-    <div class="panel active" id="panel-detail">
+    <!-- F1 TRACKED / DETAIL -->
+    <div class="panel" id="panel-detail">
       <div class="banner none" id="det-banner"><div class="bdot" id="det-bdot" style="background:var(--muted);"></div><span class="blbl" id="det-blbl" style="color:var(--muted);">NO SOURCE</span><span class="bmeta" id="det-bmeta">select an event</span></div>
       <div class="chmain">
-        <div style="flex:1;"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="cht" id="det-title">SELECT AN EVENT</span><span id="lst-pill" style="display:none;font-size:10px;padding:2px 8px;border:1px solid #A5D6A7;color:#A5D6A7;">— LST</span><span id="lst-delta" style="display:none;font-size:10px;"></span></div><div class="chm" id="det-meta">—</div></div>
+        <div style="flex:1;"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="cht" id="det-title">SELECT AN EVENT</span><span id="lst-pill" style="display:none;font-size:10px;padding:2px 8px;border:1px solid #A5D6A7;color:#A5D6A7;"></span><span id="lst-delta" style="display:none;font-size:10px;"></span></div><div class="chm" id="det-meta">—</div></div>
         <div class="chact"><button class="tmbtn" id="btn-ref" onclick="refreshSelected()" disabled>REFRESH</button><button class="tmbtn" id="btn-rem" onclick="removeSelected()" disabled style="color:#FF5252;border-color:#FF5252;">REMOVE</button></div>
       </div>
       <div class="mstrip">
@@ -273,34 +324,33 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
           <div class="cctrl">
             <div class="stgl" id="stgl"><button class="stog" id="tog-f" onclick="togS('floor',this)">FLOOR</button><button class="stog om" id="tog-m" onclick="togS('med',this)">MEDIAN</button><button class="stog" id="tog-a" onclick="togS('avg',this)">AVG</button><button class="stog" id="tog-x" onclick="togS('max',this)">MAX</button></div>
             <div class="ctabs"><div class="ctab active" onclick="switchMode('price',this)">PRICE</div><div class="ctab" onclick="switchMode('count',this)">LISTINGS</div></div>
-            <span style="font-size:9px;padding:2px 7px;border:1px solid var(--muted);color:var(--muted);">SG↔TE SOON</span>
           </div>
         </div>
-        <div class="cwrap"><div id="empty-ch" class="empty"><span style="font-size:20px;color:var(--border);">▬▬▬</span><span>NO DATA<span class="blink">_</span></span><span style="font-size:10px;">SELECT AN EVENT OR ADD ONE WITH F2/F3</span></div><canvas id="main-ch" style="display:none;width:100%;height:100%;"></canvas></div>
+        <div class="cwrap"><div id="empty-ch" class="empty"><span style="font-size:20px;color:var(--border);">▬▬▬</span><span>NO DATA<span class="blink">_</span></span><span style="font-size:10px;">SELECT AN EVENT OR ADD ONE WITH F2 / F3</span></div><canvas id="main-ch" style="display:none;width:100%;height:100%;"></canvas></div>
       </div>
       <div class="snapinfo" id="snapinfo"><span id="snap-l">—</span><span id="snap-r">—</span></div>
     </div>
 
-    <!-- F2 -->
+    <!-- F2 ADD SEATGEEK -->
     <div class="panel" id="panel-addsg">
-      <div class="banner sg"><div class="bdot sg"></div><span class="blbl sg">SEATGEEK</span><span class="bmeta">Listings API v2 · credentials in GAS Script Properties</span></div>
+      <div class="banner sg"><div class="bdot" style="background:var(--sg);"></div><span class="blbl sg">SEATGEEK</span><span class="bmeta">Listings API v2 · credentials in GAS Script Properties</span></div>
       <div class="chmain"><div><div class="cht" style="color:var(--sg);">ADD EVENT</div><div class="chm">Enter SeatGeek event ID from the URL</div></div></div>
-      <div class="pbody"><div class="ifield"><div class="ilbl">SEATGEEK EVENT ID</div><input class="tminput" id="sg-id" placeholder="e.g. 5709673" onkeydown="if(event.key==='Enter')fetchSG()" /></div><button class="tmbtn pri" onclick="fetchSG()">FETCH + TRACK</button><div id="sg-st" style="margin-top:12px;font-size:11px;color:var(--muted);"></div></div>
+      <div class="pbody"><div class="ifield"><div class="ilbl">SEATGEEK EVENT ID</div><input class="tminput" id="sg-id" placeholder="e.g. 5709673" onkeydown="if(event.key==='Enter')fetchSG()" style="max-width:420px;"/></div><button class="tmbtn pri" onclick="fetchSG()">FETCH + TRACK</button><div id="sg-st" style="margin-top:12px;font-size:11px;color:var(--muted);"></div></div>
     </div>
 
-    <!-- F3 -->
+    <!-- F3 ADD TEVO -->
     <div class="panel" id="panel-addtevo">
-      <div class="banner te"><div class="bdot te"></div><span class="blbl te">TICKET EVOLUTION</span><span class="bmeta">Events + Listings v9 · HMAC signed via GAS</span></div>
+      <div class="banner te"><div class="bdot" style="background:var(--te);"></div><span class="blbl te">TICKET EVOLUTION</span><span class="bmeta">Events + Listings v9 · HMAC signed via GAS</span></div>
       <div class="chmain"><div><div class="cht" style="color:var(--te);">SEARCH + TRACK</div><div class="chm">Search by performer, team, or venue</div></div></div>
-      <div class="pbody"><div class="ifield"><div class="ilbl">SEARCH QUERY</div><div style="position:relative;"><input class="tminput" id="te-q" placeholder="e.g. Lakers, Yankees, Knicks" onkeydown="if(event.key==='Enter')searchTE()" /><div id="te-dd" class="dropdown" style="display:none;"></div></div></div><button class="tmbtn pri" onclick="searchTE()">SEARCH EVENTS</button><div id="te-st" style="margin-top:12px;font-size:11px;color:var(--muted);"></div></div>
+      <div class="pbody"><div class="ifield"><div class="ilbl">SEARCH QUERY</div><div style="position:relative;max-width:420px;"><input class="tminput" id="te-q" placeholder="e.g. Lakers, Yankees, Knicks" onkeydown="if(event.key==='Enter')searchTE()" /><div id="te-dd" class="dropdown" style="display:none;"></div></div></div><button class="tmbtn pri" onclick="searchTE()">SEARCH EVENTS</button><div id="te-st" style="margin-top:12px;font-size:11px;color:var(--muted);"></div></div>
     </div>
 
     <!-- F4 FEED -->
     <div class="panel" id="panel-feed">
-      <div class="banner rss"><div class="bdot rss"></div><span class="blbl rss">DEMAND FEED</span><span class="bmeta">RSS · Twitter/X · ESPN · Rotoworld · AI scored via Haiku</span></div>
+      <div class="banner rss"><div class="bdot" style="background:var(--rss);"></div><span class="blbl rss">DEMAND FEED</span><span class="bmeta">rss.app webhook push · keyword feeds · AI scored · polls every 60s</span></div>
       <div class="chmain">
-        <div style="flex:1;"><div style="display:flex;align-items:center;gap:8px;"><span class="cht" style="color:var(--rss);">LIVE FEED</span><span id="feed-badge" style="font-size:10px;padding:2px 8px;border:1px solid var(--rss);color:var(--rss);">0 ITEMS</span><span id="feed-updated" style="font-size:10px;color:var(--muted);"></span></div><div class="chm" id="feed-summary">Add RSS sources in Settings → Manage Sources to activate</div></div>
-        <div class="chact"><button class="tmbtn rpri" onclick="loadFeed()" id="btn-feed-ref">REFRESH FEED</button><button class="tmbtn apri" onclick="scoreFeed()" id="btn-score">SCORE WITH AI</button><button class="tmbtn" onclick="showPanel('feedsrc',null)" style="font-size:9px;">MANAGE SOURCES</button></div>
+        <div style="flex:1;"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="cht" style="color:var(--rss);">LIVE FEED</span><span id="feed-badge" style="font-size:10px;padding:2px 8px;border:1px solid var(--rss);color:var(--rss);">0 ITEMS</span><span id="feed-updated" style="font-size:10px;color:var(--muted);"></span></div><div class="chm">Filters at source via rss.app league tags</div></div>
+        <div class="chact"><button class="tmbtn rpri" onclick="loadFeed()" id="btn-feed-ref">REFRESH</button><button class="tmbtn apri" onclick="scoreLiveFeed()" id="btn-score">SCORE WITH AI</button><button class="tmbtn" onclick="showPanel('feedsrc',null)" style="font-size:9px;">MANAGE SOURCES</button></div>
       </div>
       <div class="feed-bar">
         <div class="fpill active" onclick="setLF('all',this)">ALL</div>
@@ -312,25 +362,31 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
         <input class="fsearch" id="feed-kw" placeholder="keyword or team..." oninput="renderFeed()" />
         <div style="display:flex;gap:4px;margin-left:auto;"><div class="fpill" id="f-high" onclick="setIF('High',this)">HIGH</div><div class="fpill" id="f-med" onclick="setIF('Medium',this)">MED</div></div>
       </div>
-      <div class="feed-list" id="feed-list"><div class="empty" style="height:300px;"><span style="font-size:16px;color:var(--border);">▬▬▬</span><span>FEED NOT CONFIGURED<span class="blink">_</span></span><span style="font-size:10px;">ADD RSS SOURCES → MANAGE SOURCES</span></div></div>
+      <div class="feed-list" id="feed-list"><div class="empty"><span style="font-size:16px;color:var(--border);">▬▬▬</span><span>AWAITING WEBHOOK PUSH<span class="blink">_</span></span><span style="font-size:10px;">ADD RSS_APP_KEY · CREATE KEYWORD FEEDS · ITEMS PUSH AUTOMATICALLY</span></div></div>
     </div>
 
     <!-- F4 MANAGE SOURCES -->
     <div class="panel" id="panel-feedsrc">
-      <div class="banner rss"><div class="bdot rss"></div><span class="blbl rss">MANAGE RSS SOURCES</span><span class="bmeta">any RSS URL — rss.app, ESPN, Rotoworld, Google News</span></div>
-      <div class="chmain"><div><div class="cht" style="color:var(--rss);">RSS SOURCES</div></div><button class="tmbtn" onclick="showPanel('feed',document.querySelectorAll('.fkey')[3])">← BACK TO FEED</button></div>
+      <div class="banner rss"><div class="bdot" style="background:var(--rss);"></div><span class="blbl rss">MANAGE SOURCES</span><span class="bmeta">rss.app API · keyword feeds · league tagging · webhook delivery</span></div>
+      <div class="chmain"><div><div class="cht" style="color:var(--rss);">RSS.APP SOURCES</div></div><button class="tmbtn" onclick="showPanel('feed',document.querySelectorAll('.fkey')[3])">← BACK TO FEED</button></div>
       <div class="pbody">
-        <div class="sectitle" style="margin-top:0;"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--rss);display:inline-block;"></div>ADD NEW SOURCE</div>
+        <div class="sectitle" style="margin-top:0;"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--rss);display:inline-block;"></div>CREATE NEW FEED</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-          <div class="ifield"><div class="ilbl">SOURCE NAME</div><input class="tminput" id="rss-name" placeholder="ESPN NBA, rss.app Lakers..." style="max-width:100%;"/></div>
           <div class="ifield"><div class="ilbl">LEAGUE</div><select class="tmsel" id="rss-league"><option value="General">General</option><option value="NBA">NBA</option><option value="NFL">NFL</option><option value="NHL">NHL</option><option value="MLB">MLB</option></select></div>
+          <div class="ifield"><div class="ilbl">TYPE</div><select class="tmsel" id="rss-type" onchange="updateRssLabel()"><option value="keyword">Keyword / Topic</option><option value="url">URL / Website</option></select></div>
         </div>
-        <div class="ifield"><div class="ilbl">RSS URL</div><input class="tminput" id="rss-url" placeholder="https://..." style="max-width:100%;"/></div>
-        <button class="tmbtn rpri" onclick="addRSSSrc()" style="margin-bottom:20px;">ADD SOURCE</button>
-        <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--rss);display:inline-block;"></div>CURRENT SOURCES</div>
-        <div id="rss-src-list"><div style="color:var(--muted);font-size:11px;">No sources yet</div></div>
-        <div class="sectitle" style="margin-top:20px;"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:#B39DDB;display:inline-block;"></div>AI SCORING NOTE</div>
-        <div style="font-size:11px;color:var(--muted);line-height:1.8;">Add <span style="color:var(--white);">ANTHROPIC_API_KEY</span> to GAS Script Properties to enable scoring.<br>Scoring is on-demand only — never runs automatically.<br>Uses Claude Haiku (~$0.01 per full feed score).</div>
+        <div class="ifield"><div class="ilbl" id="rss-input-lbl">KEYWORD OR TOPIC</div><input class="tminput" id="rss-input" placeholder="e.g. Lakers injury, NBA trade deadline" /></div>
+        <button class="tmbtn rpri" onclick="createRSSFeed()" style="margin-bottom:6px;">CREATE FEED IN RSS.APP</button>
+        <div id="rss-create-status" style="font-size:11px;color:var(--muted);margin-bottom:16px;min-height:16px;"></div>
+        <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--rss);display:inline-block;"></div>YOUR FEEDS <button class="tmbtn" onclick="loadRSSFeeds()" style="font-size:9px;margin-left:8px;">REFRESH</button></div>
+        <div id="rss-feed-list"><div style="color:var(--muted);font-size:11px;">Loading from rss.app...</div></div>
+        <div class="sectitle" style="margin-top:20px;"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:#B39DDB;display:inline-block;"></div>WEBHOOK ENDPOINT</div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.9;max-width:500px;">
+          In <span style="color:var(--white);">rss.app → Account → API Settings → Webhooks</span> paste your GAS URL:<br>
+          <span id="gas-url-display" style="color:var(--rss);word-break:break-all;font-size:10px;">(save GAS URL in F8 first)</span>
+        </div>
+        <div class="sectitle" style="margin-top:16px;"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:#FBBC04;display:inline-block;"></div>REQUIRED SCRIPT PROPERTIES</div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.9;"><span style="color:var(--white);">RSS_APP_KEY</span> · <span style="color:var(--white);">RSS_APP_SECRET</span> — from rss.app/account/api</div>
       </div>
     </div>
 
@@ -363,14 +419,14 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
         </div>
         <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></div>BACKGROUND PATTERN</div>
         <div class="bg-grid">
-          <div class="bg-card active" id="bg-none" onclick="applyBG('none',this)" style="color:var(--muted);">NONE</div>
-          <div class="bg-card" id="bg-dots" onclick="applyBG('dots',this)" style="background:radial-gradient(circle,#333 1px,transparent 1px);background-size:16px 16px;color:var(--white);">DOTS</div>
-          <div class="bg-card" id="bg-grid" onclick="applyBG('grid',this)" style="background-image:linear-gradient(rgba(255,255,255,0.05) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.05) 1px,transparent 1px);background-size:20px 20px;color:var(--white);">GRID</div>
-          <div class="bg-card" id="bg-scanline" onclick="applyBG('scanline',this)" style="background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.3) 2px,rgba(0,0,0,0.3) 4px);color:var(--white);">SCANLINES</div>
+          <div class="bg-card active" id="bg-none" onclick="applyBG('none',this)">NONE</div>
+          <div class="bg-card" id="bg-dots" onclick="applyBG('dots',this)" style="background:radial-gradient(circle,#333 1px,transparent 1px);background-size:16px 16px;">DOTS</div>
+          <div class="bg-card" id="bg-grid" onclick="applyBG('grid',this)" style="background-image:linear-gradient(rgba(255,255,255,0.05) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.05) 1px,transparent 1px);background-size:20px 20px;">GRID</div>
+          <div class="bg-card" id="bg-scanline" onclick="applyBG('scanline',this)" style="background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.3) 2px,rgba(0,0,0,0.3) 4px);">SCANLINES</div>
           <div class="bg-card" id="bg-stars" onclick="applyBG('stars',this)" style="background:#000;color:#FFD700;">✦ STARS</div>
-          <div class="bg-card" id="bg-diagonal" onclick="applyBG('diagonal',this)" style="background:repeating-linear-gradient(45deg,rgba(255,255,255,0.03),rgba(255,255,255,0.03) 1px,transparent 1px,transparent 8px);color:var(--white);">DIAGONAL</div>
+          <div class="bg-card" id="bg-diagonal" onclick="applyBG('diagonal',this)" style="background:repeating-linear-gradient(45deg,rgba(255,255,255,0.03),rgba(255,255,255,0.03) 1px,transparent 1px,transparent 8px);">DIAGONAL</div>
           <div class="bg-card" id="bg-circuit" onclick="applyBG('circuit',this)" style="background:#001100;color:#00FF41;">CIRCUIT</div>
-          <div class="bg-card" id="bg-noise" onclick="applyBG('noise',this)" style="color:var(--muted);">NOISE</div>
+          <div class="bg-card" id="bg-noise" onclick="applyBG('noise',this)">NOISE</div>
         </div>
         <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></div>CURSOR</div>
         <div class="cur-grid">
@@ -382,589 +438,551 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
           <div class="cur-card" id="cur-wait" onclick="applyCursor('wait',this)" style="cursor:wait;">LOADING</div>
         </div>
         <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></div>TERMINAL NAME</div>
-        <div class="ifield" style="max-width:300px;"><div class="ilbl">DISPLAY NAME</div><input class="tminput" id="term-name" placeholder="S4K TERMINAL" oninput="applyTermName(this.value)" style="max-width:100%;"/></div>
+        <div class="ifield" style="max-width:300px;"><div class="ilbl">DISPLAY NAME</div><input class="tminput" id="term-name" placeholder="S4K TERMINAL" oninput="applyTermName(this.value)"/></div>
         <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></div>MARQUEE <span style="font-size:9px;color:var(--muted);margin-left:6px;">PEAK INTERNET</span></div>
-        <div class="ifield" style="max-width:420px;"><div class="ilbl">SCROLLING MESSAGE (blank to disable)</div><input class="tminput" id="marquee-text" placeholder="S4K TERMINAL · TICKET MARKET ANALYTICS · " oninput="applyMarquee(this.value)" style="max-width:100%;"/></div>
+        <div class="ifield" style="max-width:420px;"><div class="ilbl">SCROLLING MESSAGE (blank to disable)</div><input class="tminput" id="marquee-text" placeholder="S4K TERMINAL · TICKET MARKET ANALYTICS · " oninput="applyMarquee(this.value)"/></div>
         <div id="marquee-preview" style="display:none;overflow:hidden;border:1px solid var(--border);padding:4px 0;margin-top:8px;background:var(--bg2);"><div id="marquee-inner" style="white-space:nowrap;font-size:10px;color:var(--amber);animation:marquee 12s linear infinite;display:inline-block;padding-left:100%;"></div></div>
       </div>
     </div>
 
-    <!-- F6 INTELLIGENCE -->
-    <div class="panel" id="panel-intel">
-      <div class="banner none" style="background:var(--bg3);"><div class="bdot" style="background:#B39DDB;"></div><span class="blbl" style="color:#B39DDB;">S4K INTELLIGENCE</span><span class="bmeta" id="intel-banner-meta">AI-powered market analyst · personalized feed · chat</span></div>
+    <!-- F6 INTELLIGENCE — DEFAULT -->
+    <div class="panel active" id="panel-intel">
+      <div class="banner intel"><div class="bdot" style="background:#B39DDB;"></div><span class="blbl intel">S4K INTELLIGENCE</span><span class="bmeta">AI market analyst · personalized feed · TEvo search in chat</span></div>
       <div class="intel-tabs">
         <div class="itab active" id="itab-feed" onclick="switchIntelTab('feed',this)">FEED <span id="unread-badge" class="unread-badge" style="display:none;">0</span></div>
         <div class="itab" id="itab-chat" onclick="switchIntelTab('chat',this)">CHAT</div>
         <div style="margin-left:auto;display:flex;gap:6px;align-items:center;padding:0 12px;">
-          <button class="tmbtn" onclick="generateBrief()" style="font-size:9px;color:#B39DDB;border-color:#B39DDB;">BRIEF</button>
+          <button class="tmbtn apri" onclick="generateBrief()" style="font-size:9px;">BRIEF</button>
           <button class="tmbtn" onclick="generateDigest()" style="font-size:9px;color:var(--purple);border-color:var(--purple);">DIGEST</button>
           <button class="tmbtn" onclick="loadIntelFeed()" style="font-size:9px;">REFRESH</button>
         </div>
       </div>
-
-      <!-- FEED tab -->
       <div class="intel-panel active" id="intel-feed">
         <div class="intel-toolbar">
-          <div class="fpill active" onclick="setFeedType('all',this)">ALL</div>
-          <div class="fpill" onclick="setFeedType('alert',this)" style="color:var(--red);border-color:var(--red);">ALERTS</div>
-          <div class="fpill" onclick="setFeedType('story',this)" style="color:var(--cyan);border-color:var(--cyan);">STORIES</div>
-          <div class="fpill" onclick="setFeedType('brief',this)" style="color:var(--amber);border-color:var(--amber);">BRIEFS</div>
-          <div class="fpill" onclick="setFeedType('digest',this)" style="color:var(--purple);border-color:var(--purple);">DIGESTS</div>
-          <div style="margin-left:auto;font-size:10px;color:var(--muted);" id="feed-item-count">0 items</div>
+          <div class="fpill active" onclick="setIntelType('all',this)">ALL</div>
+          <div class="fpill" onclick="setIntelType('alert',this)" style="color:var(--red);border-color:var(--red);">ALERTS</div>
+          <div class="fpill" onclick="setIntelType('story',this)" style="color:var(--cyan);border-color:var(--cyan);">STORIES</div>
+          <div class="fpill" onclick="setIntelType('brief',this)" style="color:var(--amber);border-color:var(--amber);">BRIEFS</div>
+          <div class="fpill" onclick="setIntelType('digest',this)" style="color:var(--purple);border-color:var(--purple);">DIGESTS</div>
+          <span id="intel-count" style="font-size:10px;color:var(--muted);margin-left:auto;">0 items</span>
         </div>
-        <div class="feed-list" id="intel-feed-list" style="flex:1;overflow-y:auto;">
-          <div class="empty" style="height:300px;">
-            <span style="font-size:16px;color:var(--border);">▬▬▬</span>
-            <span>NO INTELLIGENCE YET<span class="blink">_</span></span>
-            <span style="font-size:10px;">ADD DATA → TRACK EVENTS → BRIEF GENERATES AUTOMATICALLY AT 8AM</span>
-          </div>
-        </div>
-        <div style="padding:8px 12px;border-top:1px solid var(--border);background:var(--bg2);flex-shrink:0;">
-          <button class="tmbtn" onclick="generateStory()" style="font-size:9px;color:var(--cyan);border-color:var(--cyan);">GENERATE STORY FOR SELECTED EVENT</button>
-        </div>
+        <div class="feed-list" id="intel-feed-list"><div class="empty"><span style="font-size:16px;color:var(--border);">▬▬▬</span><span>NO INTELLIGENCE YET<span class="blink">_</span></span><span style="font-size:10px;">TRACK EVENTS → REFRESH PRICES → BRIEF GENERATES AT 8AM</span></div></div>
+        <div style="padding:8px 12px;border-top:1px solid var(--border);background:var(--bg2);flex-shrink:0;"><button class="tmbtn" onclick="generateStory()" style="font-size:9px;color:var(--cyan);border-color:var(--cyan);">GENERATE STORY FOR SELECTED EVENT</button></div>
       </div>
-
-      <!-- CHAT tab -->
       <div class="intel-panel" id="intel-chat">
         <div class="chat-list" id="chat-messages">
           <div style="padding:16px;color:var(--muted);font-size:11px;line-height:1.8;">
             <div style="color:#B39DDB;font-weight:500;margin-bottom:8px;font-size:12px;">S4K INTELLIGENCE</div>
-            I'm your AI ticket market analyst. I have access to your tracked events, price snapshots, and demand feed.<br><br>
-            Try asking:<br>
-            <span style="color:var(--white);">· What's happening with my Lakers prices?</span><br>
-            <span style="color:var(--white);">· Which events should I watch this week?</span><br>
-            <span style="color:var(--white);">· Is inventory tightening on any events?</span><br>
-            <span style="color:var(--white);">· What's the demand signal for the Rangers game?</span>
+            I'm your AI ticket market analyst with direct access to Ticket Evolution. Ask me to find events, pull live pricing, or analyze your portfolio.<br><br>
+            <span style="color:var(--white);">· Find me Knicks games at MSG next month</span><br>
+            <span style="color:var(--white);">· What's the floor on Lakers tickets right now?</span><br>
+            <span style="color:var(--white);">· Is inventory tightening on any events I'm tracking?</span><br>
+            <span style="color:var(--white);">· Search Rangers playoffs and get me prices</span>
           </div>
         </div>
         <div class="chat-input-wrap">
-          <textarea class="chat-input" id="chat-input" placeholder="Ask anything about your ticket market..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"></textarea>
-          <button class="tmbtn pri" onclick="sendChat()" id="chat-send-btn" style="height:60px;width:80px;">SEND</button>
+          <textarea class="chat-input" id="chat-input" placeholder="Ask anything — search events, get prices, analyze portfolio..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"></textarea>
+          <button class="tmbtn pri" onclick="sendChat()" id="chat-send-btn" style="height:60px;width:80px;flex-shrink:0;">SEND</button>
         </div>
       </div>
     </div>
 
+    <!-- F8 SETTINGS -->
     <div class="panel" id="panel-creds">
       <div class="banner none" style="background:var(--bg3);"><div class="bdot" style="background:var(--amber);"></div><span class="blbl" style="color:var(--amber);">SETTINGS</span><span class="bmeta">GAS URL · all API keys in Script Properties · never in browser</span></div>
       <div class="chmain"><div><div class="cht">CONFIGURE TERMINAL</div></div></div>
       <div class="pbody">
         <div class="sectitle" style="margin-top:0;"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:#FBBC04;display:inline-block;"></div>GOOGLE APPS SCRIPT</div>
         <div id="conn-box" class="connbox" style="display:none;"></div>
-        <div class="ifield"><div class="ilbl">WEB APP URL</div><input class="tminput" id="cred-gas" placeholder="https://script.google.com/macros/s/.../exec" style="max-width:100%;"/></div>
-        <div style="display:flex;gap:8px;margin-bottom:20px;"><button class="tmbtn" onclick="testConn()">TEST CONNECTION</button><button class="tmbtn pri" onclick="saveCreds()">SAVE + UPDATE SOURCE BAR</button></div>
-        <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:#FBBC04;display:inline-block;"></div>SCRIPT PROPERTIES TO ADD IN GAS</div>
+        <div class="ifield"><div class="ilbl">WEB APP URL</div><input class="tminput" id="cred-gas" placeholder="https://script.google.com/macros/s/.../exec"/></div>
+        <div style="display:flex;gap:8px;margin-bottom:24px;"><button class="tmbtn" onclick="testConn()">TEST CONNECTION</button><button class="tmbtn pri" onclick="saveCreds()">SAVE + UPDATE SOURCE BAR</button></div>
+        <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:#FBBC04;display:inline-block;"></div>SCRIPT PROPERTIES</div>
         <div style="font-size:11px;color:var(--muted);line-height:2;max-width:500px;">
-          Go to script.google.com → Project Settings → Script Properties:<br>
           <span style="color:var(--white);">SG_CLIENT_ID</span> · SeatGeek client ID<br>
           <span style="color:var(--white);">SG_CLIENT_SECRET</span> · SeatGeek secret<br>
-          <span style="color:var(--white);">TE_API_KEY</span> · Ticket Evolution key<br>
-          <span style="color:var(--white);">TE_SECRET</span> · Ticket Evolution secret<br>
-          <span style="color:var(--white);">ANTHROPIC_API_KEY</span> · Enables F4 AI scoring
+          <span style="color:var(--white);">TE_API_KEY</span> · Ticket Evolution key ✓<br>
+          <span style="color:var(--white);">TE_SECRET</span> · Ticket Evolution secret ✓<br>
+          <span style="color:var(--white);">ANTHROPIC_API_KEY</span> · AI chat + scoring + briefs<br>
+          <span style="color:var(--white);">RSS_APP_KEY</span> · rss.app API key<br>
+          <span style="color:var(--white);">RSS_APP_SECRET</span> · rss.app secret<br>
+          <span style="color:var(--white);">SLACK_WEBHOOK</span> · optional Slack push
         </div>
       </div>
     </div>
+
   </div>
 </div>
+
 <div class="botbar"><span><span class="sdot2"></span>LIVE</span><span id="statusmsg">READY</span><span id="snaptotal">0 SNAPSHOTS</span></div>
 </div>
 
 <script>
-const CKEY='s4k_v3';
-let tracked={},selKey=null,chart=null,cmode='price';
+// ================================================================
+// STATE
+// ================================================================
+const CKEY='s4k_v5', TKEY='s4k_theme_v1';
+let tracked={}, selKey=null, chart=null, cmode='price';
 let son={floor:false,med:true,avg:false,max:false};
-let feedItems=[],lfilt='all',ifilt=null,rssSrcs=[];
+let feedItems=[], lfilt='all', ifilt=null;
+let intelItems=[], intelTypeFilter='all';
+let chatHistory=[], chatWaiting=false;
+let feedPollTimer=null;
 
-function tick(){document.getElementById('clock').textContent=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});}
-setInterval(tick,1000);tick();
-function toast(msg,type='ok'){const el=document.getElementById('toast');el.textContent=msg;el.className=`toast ${type}`;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>el.style.display='none',3500);}
-function setSt(msg){document.getElementById('statusmsg').textContent=msg;}
+// ================================================================
+// CORE UTILS
+// ================================================================
+function tick(){ document.getElementById('clock').textContent=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}); }
+setInterval(tick,1000); tick();
+
+function toast(msg,type='ok'){ const el=document.getElementById('toast'); el.textContent=msg; el.className=`toast ${type}`; el.style.display='block'; clearTimeout(el._t); el._t=setTimeout(()=>el.style.display='none',3500); }
+function setSt(msg){ document.getElementById('statusmsg').textContent=msg; }
 
 function showPanel(id,el){
   document.querySelectorAll('.fkey').forEach(f=>f.classList.remove('active'));
-  if(el&&el.classList&&el.classList.contains('fkey'))el.classList.add('active');
+  if(el&&el.classList&&el.classList.contains('fkey')) el.classList.add('active');
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('panel-'+id).classList.add('active');
-  if(id==='feed'||id==='feedsrc')loadRSSSrcs();
+  if(id==='feed'){ loadFeed(); startFeedPoll(); } else { stopFeedPoll(); }
+  if(id==='feedsrc'){ loadRSSFeeds(); const u=document.getElementById('gas-url-display'); if(u) u.textContent=getCreds().gas||'(save GAS URL in F8 first)'; }
+  if(id==='intel') loadIntelFeed();
 }
 
-function loadCreds(){try{const c=JSON.parse(localStorage.getItem(CKEY)||'{}');document.getElementById('cred-gas').value=c.gas||'';updateSrcBar(c);return c;}catch(e){return{};}}
-function getCreds(){try{return JSON.parse(localStorage.getItem(CKEY)||'{}')}catch(e){return{};}}
-function saveCreds(){const c={gas:document.getElementById('cred-gas').value.trim()};localStorage.setItem(CKEY,JSON.stringify(c));updateSrcBar(c);toast('SETTINGS SAVED');}
+// ================================================================
+// CREDENTIALS
+// ================================================================
+function loadCreds(){ try{ const c=JSON.parse(localStorage.getItem(CKEY)||'{}'); document.getElementById('cred-gas').value=c.gas||''; updateSrcBar(c); return c; }catch(e){ return{}; } }
+function getCreds(){ try{ return JSON.parse(localStorage.getItem(CKEY)||'{}'); }catch(e){ return{}; } }
+function saveCreds(){ const c={gas:document.getElementById('cred-gas').value.trim()}; localStorage.setItem(CKEY,JSON.stringify(c)); updateSrcBar(c); toast('SETTINGS SAVED'); }
 function updateSrcBar(c){
-  const st=(id,cls,txt)=>{const el=document.getElementById(id);if(!el)return;el.textContent=txt;el.className='stag '+cls;};
-  st('tag-gas',c.gas?'live':'cfg',c.gas?'LIVE':'NEEDS URL');
-  st('tag-sheets',c.gas?'live':'cfg',c.gas?'LIVE':'PENDING');
-  st('tag-sg',c._sgOk?'live':'cfg',c._sgOk?'LIVE':'NEEDS KEY');
-  st('tag-te',c._teOk?'live':'cfg',c._teOk?'LIVE':'NEEDS KEY');
-  st('tag-anth',c._anthOk?'live':'cfg',c._anthOk?'LIVE':'NEEDS KEY');
-  if(c._rssCount>0)st('tag-rss','live',`${c._rssCount} SOURCE${c._rssCount!==1?'S':''}`);
-  else st('tag-rss','ntk','NEEDS TOKEN');
+  const st=(id,cls,txt)=>{ const el=document.getElementById(id); if(!el)return; el.textContent=txt; el.className='stag '+cls; };
+  st('tag-gas',  c.gas?'live':'cfg',     c.gas?'LIVE':'NEEDS URL');
+  st('tag-sheets',c.gas?'live':'cfg',    c.gas?'LIVE':'PENDING');
+  st('tag-sg',   c._sgOk?'live':'cfg',   c._sgOk?'LIVE':'NEEDS KEY');
+  st('tag-te',   c._teOk?'live':'cfg',   c._teOk?'LIVE':'NEEDS KEY');
+  st('tag-anth', c._anthOk?'live':'cfg', c._anthOk?'LIVE':'NEEDS KEY');
+  if(c._rssCount>0) st('tag-rss','live',`${c._rssCount} FEED${c._rssCount!==1?'S':''}`);
+  else if(c._rssOk) st('tag-rss','cfg','NO FEEDS YET');
+  else              st('tag-rss','ntk','NEEDS KEY');
 }
-async function gasGet(p){const c=getCreds();if(!c.gas)throw new Error('GAS URL not set');const r=await fetch(`${c.gas}?${new URLSearchParams(p)}`);if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json();}
-async function gasPost(b){const c=getCreds();if(!c.gas)throw new Error('GAS URL not set');const r=await fetch(c.gas,{method:'POST',body:JSON.stringify(b)});if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json();}
+async function gasGet(p){ const c=getCreds(); if(!c.gas) throw new Error('GAS URL not set'); const r=await fetch(`${c.gas}?${new URLSearchParams(p)}`); if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }
+async function gasPost(b){ const c=getCreds(); if(!c.gas) throw new Error('GAS URL not set'); const r=await fetch(c.gas,{method:'POST',body:JSON.stringify(b)}); if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }
 async function testConn(){
-  const box=document.getElementById('conn-box');box.style.display='block';box.className='connbox';box.textContent='TESTING...';
+  const box=document.getElementById('conn-box'); box.style.display='block'; box.className='connbox'; box.textContent='TESTING...';
   try{
     const url=document.getElementById('cred-gas').value.trim();
-    if(!url){box.textContent='ENTER URL FIRST';box.className='connbox err';return;}
+    if(!url){ box.textContent='ENTER URL FIRST'; box.className='connbox err'; return; }
     const d=await(await fetch(`${url}?action=ping`)).json();
-    if(d.ok){box.textContent=`CONNECTED · ${d.ts} · SG:${d.sg?'OK':'NO KEY'} · TE:${d.te?'OK':'NO KEY'} · AI:${d.anthropic?'OK':'NO KEY'}`;box.className='connbox ok';const c=getCreds();c._sgOk=d.sg;c._teOk=d.te;c._anthOk=d.anthropic;localStorage.setItem(CKEY,JSON.stringify(c));updateSrcBar(c);}
-    else{box.textContent=`ERROR: ${d.error}`;box.className='connbox err';}
-  }catch(e){box.textContent=`FAILED: ${e.message}`;box.className='connbox err';}
+    if(d.ok){
+      box.textContent=`CONNECTED · SG:${d.sg?'OK':'NO KEY'} · TE:${d.te?'OK':'NO KEY'} · AI:${d.anthropic?'OK':'NO KEY'} · RSS:${d.rss?'OK':'NO KEY'}`;
+      box.className='connbox ok';
+      const c=getCreds(); c._sgOk=d.sg; c._teOk=d.te; c._anthOk=d.anthropic; c._rssOk=d.rss;
+      localStorage.setItem(CKEY,JSON.stringify(c)); updateSrcBar(c);
+    } else { box.textContent=`ERROR: ${d.error}`; box.className='connbox err'; }
+  }catch(e){ box.textContent=`FAILED: ${e.message}`; box.className='connbox err'; }
 }
 
-function calcStats(p){if(!p.length)return{floor:0,max:0,avg:0,median:0,count:0};const s=[...p].sort((a,b)=>a-b);const sum=s.reduce((a,b)=>a+b,0);const mid=Math.floor(s.length/2);return{floor:s[0],max:s[s.length-1],avg:Math.round(sum/s.length),median:s.length%2===0?Math.round((s[mid-1]+s[mid])/2):s[mid],count:s.length};}
-function daysUntil(d){if(!d)return null;return Math.max(0,Math.round((new Date(d)-new Date())/864e5));}
-function dayOfWeek(d){if(!d)return'';return['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(d).getDay()];}
-function fmt(n){return n>=1000?'$'+n.toLocaleString():'$'+n;}
-function fmtC(n){return Number(n).toLocaleString();}
-function dHtml(n,isC){if(!n||n===0)return'<span style="color:var(--muted)">—</span>';const a=Math.abs(n);const s=isC?a.toLocaleString():'$'+a.toLocaleString();return n>0?`<span class="dup">▲ ${s}</span>`:`<span class="ddn">▼ ${s}</span>`;}
-function skey(src,v,p){return`${src}::${(v||'').replace(/[^\w]/g,'_').substring(0,30)}::${(p||'').replace(/[^\w]/g,'_').substring(0,30)}`;}
-function ago(ds){const d=new Date(ds);const m=Math.round((Date.now()-d)/60000);if(m<60)return`${m}m ago`;if(m<1440)return`${Math.round(m/60)}h ago`;return`${Math.round(m/1440)}d ago`;}
+// ================================================================
+// HELPERS
+// ================================================================
+function calcStats(p){ if(!p.length)return{floor:0,max:0,avg:0,median:0,count:0};const s=[...p].sort((a,b)=>a-b);const sum=s.reduce((a,b)=>a+b,0);const mid=Math.floor(s.length/2);return{floor:s[0],max:s[s.length-1],avg:Math.round(sum/s.length),median:s.length%2===0?Math.round((s[mid-1]+s[mid])/2):s[mid],count:s.length}; }
+function daysUntil(d){ if(!d)return null; return Math.max(0,Math.round((new Date(d)-new Date())/864e5)); }
+function dayOfWeek(d){ if(!d)return''; return['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(d).getDay()]; }
+function fmt(n){ return n>=1000?'$'+Number(n).toLocaleString():'$'+n; }
+function fmtC(n){ return Number(n).toLocaleString(); }
+function dHtml(n,isC){ if(!n||n===0)return'<span style="color:var(--muted)">—</span>'; const a=Math.abs(n),s=isC?a.toLocaleString():'$'+a.toLocaleString(); return n>0?`<span class="dup">▲ ${s}</span>`:`<span class="ddn">▼ ${s}</span>`; }
+function skey(src,v,p){ return`${src}::${(v||'').replace(/[^\w]/g,'_').substring(0,30)}::${(p||'').replace(/[^\w]/g,'_').substring(0,30)}`; }
+function ago(ds){ const d=new Date(ds),m=Math.round((Date.now()-d)/60000); if(m<1)return'just now'; if(m<60)return`${m}m ago`; if(m<1440)return`${Math.round(m/60)}h ago`; return`${Math.round(m/1440)}d ago`; }
 
-async function loadTracked(){setSt('LOADING...');try{const d=await gasGet({action:'tracked'});tracked={};(d.events||[]).forEach(ev=>{tracked[ev.key]={...ev,history:[]};});for(const k of Object.keys(tracked))await loadHistory(k);renderSidebar();updateTotal();setSt('READY');}catch(e){setSt('ADD GAS URL IN F8');}}
-async function loadHistory(key){const ev=tracked[key];if(!ev)return;try{const d=await gasGet({action:'history',src:ev.src,event_id:ev.event_id});ev.history=(d.rows||[]).map(r=>({ts:r.snapshot_ts,floor:Number(r.floor),avg:Number(r.avg),median:Number(r.median),max:Number(r.max),count:Number(r.count)}));}catch(e){ev.history=[];}}
+// ================================================================
+// F1 — TRACKED EVENTS + DETAIL
+// ================================================================
+async function loadTracked(){
+  setSt('LOADING...');
+  try{ const d=await gasGet({action:'tracked'}); tracked={}; (d.events||[]).forEach(ev=>{tracked[ev.key]={...ev,history:[]};});
+    for(const k of Object.keys(tracked)) await loadHistory(k);
+    renderSidebar(); updateTotal(); setSt('READY');
+  }catch(e){ setSt('ADD GAS URL IN F8'); }
+}
+async function loadHistory(key){
+  const ev=tracked[key]; if(!ev)return;
+  try{ const d=await gasGet({action:'history',src:ev.src,event_id:ev.event_id}); ev.history=(d.rows||[]).map(r=>({ts:r.snapshot_ts,floor:Number(r.floor),avg:Number(r.avg),median:Number(r.median),max:Number(r.max),count:Number(r.count)})); }
+  catch(e){ ev.history=[]; }
+}
 async function saveSnap(src,venue,perf,eid,name,date,stats){
   const key=skey(src,venue,perf);
   const ev=tracked[key]||{key,src,event_id:eid,name,venue,performer:perf,date,added_at:new Date().toISOString(),history:[]};
   const prev=ev.history.length?ev.history[ev.history.length-1]:null;
   const du=daysUntil(date);
   const snap={source:src,event_id:eid,event_name:name,venue,performer:perf,sport_type:'',event_date:date,days_until_event:du,day_of_week_event:dayOfWeek(date),floor:stats.floor,avg:stats.avg,median:stats.median,max:stats.max,count:stats.count,floor_delta:prev?stats.floor-prev.floor:0,avg_delta:prev?stats.avg-prev.avg:0,median_delta:prev?stats.median-prev.median:0,count_delta:prev?stats.count-prev.count:0,days_until_delta:0,price_buckets:{}};
-  try{await gasPost({action:'snapshot',src,snapshot:snap});await gasPost({action:'track',event:{key,src,event_id:eid,name,venue,performer:perf,date,added_at:ev.added_at||new Date().toISOString()}});}catch(e){toast('SHEETS WRITE FAILED','err');}
-  ev.history.push({ts:new Date().toISOString(),...stats});ev.lastUpdate=new Date().toISOString();tracked[key]=ev;renderSidebar();updateTotal();return key;
+  try{ await gasPost({action:'snapshot',src,snapshot:snap}); await gasPost({action:'track',event:{key,src,event_id:eid,name,venue,performer:perf,date,added_at:ev.added_at||new Date().toISOString()}}); }
+  catch(e){ toast('SHEETS WRITE FAILED','err'); }
+  ev.history.push({ts:new Date().toISOString(),...stats}); ev.lastUpdate=new Date().toISOString();
+  tracked[key]=ev; renderSidebar(); updateTotal(); return key;
 }
-
-async function fetchSG(){
-  const c=getCreds();if(!c.gas){toast('ADD GAS URL — F8','err');return;}
-  const id=document.getElementById('sg-id').value.trim();if(!id){toast('ENTER EVENT ID','err');return;}
-  const st=document.getElementById('sg-st');st.textContent='FETCHING VIA GAS...';st.style.color='var(--amber)';setSt('FETCHING SEATGEEK...');
-  try{const d=await gasGet({action:'fetch_sg',event_id:id});if(d.error){st.textContent=`ERROR: ${d.error}`;st.style.color='var(--red)';return;}
-  const key=await saveSnap('SG',d.event.venue,d.event.performer,id,d.event.name,d.event.date,d.stats);
-  st.textContent=`TRACKED · ${fmtC(d.stats.count)} LISTINGS · SAVED`;st.style.color='var(--green)';toast('TRACKED + SAVED');setSt(`ADDED: ${d.event.name}`);selectEvent(key);document.getElementById('sg-id').value='';}
-  catch(e){st.textContent=`FAILED: ${e.message}`;st.style.color='var(--red)';}
-}
-
-async function searchTE(){
-  const c=getCreds();if(!c.gas){toast('ADD GAS URL — F8','err');return;}
-  const q=document.getElementById('te-q').value.trim();if(!q){toast('ENTER QUERY','err');return;}
-  const st=document.getElementById('te-st');const dd=document.getElementById('te-dd');
-  st.textContent='SEARCHING...';st.style.color='var(--amber)';dd.style.display='none';
-  try{const d=await gasGet({action:'search_te',q});if(d.error){st.textContent=`ERROR: ${d.error}`;st.style.color='var(--red)';return;}
-  if(!d.events?.length){st.textContent='NO EVENTS FOUND';st.style.color='var(--red)';return;}
-  st.textContent=`${d.events.length} RESULTS — SELECT ONE`;st.style.color='var(--green)';
-  dd.style.display='block';dd.innerHTML=d.events.map(ev=>`<div class="ddi" onclick="fetchTE('${ev.id}','${(ev.name||'').replace(/['"]/g,'')}','${(ev.venue?.name||'UNKNOWN').replace(/['"]/g,'')}','${(ev.performances?.[0]?.performer?.name||'UNKNOWN').replace(/['"]/g,'')}','${ev.occurs_at||''}')"><div class="ddn2">${ev.name||'UNNAMED'}</div><div class="ddm">${ev.venue?.name||''} · ${ev.occurs_at?new Date(ev.occurs_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):''}</div></div>`).join('');}
-  catch(e){st.textContent=`FAILED: ${e.message}`;st.style.color='var(--red)';}
-}
-
-async function fetchTE(eid,name,venue,perf,date){
-  document.getElementById('te-dd').style.display='none';
-  const c=getCreds();if(!c.gas){toast('ADD GAS URL — F8','err');return;}
-  const st=document.getElementById('te-st');st.textContent=`FETCHING ${name}...`;st.style.color='var(--amber)';setSt('FETCHING TEVO...');
-  try{const d=await gasGet({action:'fetch_te',event_id:eid,name:encodeURIComponent(name),venue:encodeURIComponent(venue),performer:encodeURIComponent(perf),date});
-  if(d.error){st.textContent=`ERROR: ${d.error}`;st.style.color='var(--red)';return;}
-  const key=await saveSnap('TE',venue,perf,eid,name,date,d.stats);
-  st.textContent=`TRACKED · ${fmtC(d.stats.count)} LISTINGS · SAVED`;st.style.color='var(--green)';toast('TRACKED + SAVED');setSt(`ADDED: ${name}`);selectEvent(key);document.getElementById('te-q').value='';}
-  catch(e){st.textContent=`FAILED: ${e.message}`;st.style.color='var(--red)';}
-}
-
-// ── F4 FEED ──
-async function loadRSSSrcs(){
-  try{const d=await gasGet({action:'get_rss_sources'});rssSrcs=d.sources||[];renderSrcList();
-  const active=rssSrcs.filter(s=>s.active===true||s.active==='TRUE'||s.active===1||s.active==='1').length;
-  const c=getCreds();c._rssCount=active;localStorage.setItem(CKEY,JSON.stringify(c));updateSrcBar(c);
-  document.getElementById('feed-summary').textContent=rssSrcs.length?`${rssSrcs.length} source${rssSrcs.length!==1?'s':''} configured · ${active} active`:'Add RSS sources → Manage Sources to activate';}catch(e){}
-}
-async function loadFeed(){
-  const btn=document.getElementById('btn-feed-ref');btn.disabled=true;btn.textContent='FETCHING...';setSt('FETCHING RSS FEEDS...');
-  try{const d=await gasGet({action:'fetch_rss'});feedItems=d.items||[];
-  document.getElementById('feed-badge').textContent=`${feedItems.length} ITEMS`;
-  document.getElementById('feed-updated').textContent=`updated ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`;
-  feedItems.length?renderFeed():document.getElementById('feed-list').innerHTML=`<div class="empty" style="height:300px;"><span style="font-size:16px;color:var(--border);">▬▬▬</span><span>NO ITEMS${d.sourceCount===0?' — ADD SOURCES':''}<span class="blink">_</span></span></div>`;
-  toast(`${feedItems.length} ITEMS LOADED`);setSt('FEED READY');}
-  catch(e){toast(`FEED FAILED: ${e.message}`,'err');setSt('FEED ERROR');}
-  btn.disabled=false;btn.textContent='REFRESH FEED';
-}
-async function scoreFeed(){
-  if(!feedItems.length){toast('LOAD FEED FIRST','err');return;}
-  const btn=document.getElementById('btn-score');btn.disabled=true;btn.textContent='SCORING...';setSt('AI SCORING...');
-  try{const d=await gasPost({action:'score_feed',items:feedItems.slice(0,50).map(i=>({title:i.title}))});
-  if(d.error){toast(`SCORE FAILED: ${d.error}`,'err');btn.disabled=false;btn.textContent='SCORE WITH AI';return;}
-  (d.scored||[]).forEach(s=>{const i=s.index-1;if(feedItems[i]){feedItems[i].impact=s.impact;feedItems[i].category=s.category;feedItems[i].reason=s.reason;}});
-  feedItems.sort((a,b)=>{const o={High:0,Medium:1,Low:2};return(o[a.impact]??3)-(o[b.impact]??3);});
-  renderFeed();toast('FEED SCORED');setSt('SCORING COMPLETE');}
-  catch(e){toast(`SCORE FAILED: ${e.message}`,'err');}
-  btn.disabled=false;btn.textContent='SCORE WITH AI';
-}
-function setLF(l,el){lfilt=l;document.querySelectorAll('.fpill').forEach(p=>{if(['ALL','NBA','NFL','NHL','MLB','GENERAL'].includes(p.textContent))p.classList.remove('active');});el.classList.add('active');renderFeed();}
-function setIF(i,el){ifilt=ifilt===i?null:i;document.querySelectorAll('#f-high,#f-med').forEach(p=>p.classList.remove('active'));if(ifilt)el.classList.add('active');renderFeed();}
-function renderFeed(){
-  const kw=(document.getElementById('feed-kw').value||'').toLowerCase();
-  let items=[...feedItems];
-  if(lfilt!=='all')items=items.filter(i=>i.league===lfilt);
-  if(ifilt)items=items.filter(i=>i.impact===ifilt);
-  if(kw)items=items.filter(i=>i.title.toLowerCase().includes(kw)||i.source.toLowerCase().includes(kw)||(i.description||'').toLowerCase().includes(kw));
-  const el=document.getElementById('feed-list');
-  if(!items.length){el.innerHTML=`<div class="empty" style="height:200px;"><span style="color:var(--muted);font-size:11px;">NO ITEMS MATCH FILTER</span></div>`;return;}
-  el.innerHTML=items.map(item=>`<div class="fi" onclick="${item.link?`window.open('${item.link.replace(/'/g,'')}','_blank')`:''}">
-    <div class="fi-top"><div class="fi-title">${item.title}</div>${item.impact?`<span class="fi-imp ${item.impact}">${item.impact.toUpperCase()}</span>`:''}</div>
-    <div class="fi-meta"><span class="fi-src">${item.source}</span><span class="fi-tag">${item.league}</span>${item.category?`<span class="fi-tag" style="color:var(--purple);border-color:var(--purple);">${item.category}</span>`:''}<span class="fi-time">${ago(item.pubDate)}</span></div>
-    ${item.description?`<div class="fi-desc">${item.description.substring(0,120)}...</div>`:''}
-    ${item.reason?`<div class="fi-reason">${item.reason}</div>`:''}
-  </div>`).join('');
-}
-async function addRSSSrc(){
-  const name=document.getElementById('rss-name').value.trim();const url=document.getElementById('rss-url').value.trim();const league=document.getElementById('rss-league').value;
-  if(!name||!url){toast('ENTER NAME AND URL','err');return;}
-  try{await gasPost({action:'save_rss_source',source:{id:`rss_${Date.now()}`,name,url,league,added_at:new Date().toISOString(),active:true}});
-  document.getElementById('rss-name').value='';document.getElementById('rss-url').value='';toast(`ADDED: ${name}`);await loadRSSSrcs();}
-  catch(e){toast(`FAILED: ${e.message}`,'err');}
-}
-async function delRSSSrc(id,name){
-  if(!confirm(`Remove "${name}"?`))return;
-  try{await gasPost({action:'delete_rss_source',id});toast(`REMOVED: ${name}`);await loadRSSSrcs();}catch(e){toast(`FAILED: ${e.message}`,'err');}
-}
-function renderSrcList(){
-  const el=document.getElementById('rss-src-list');
-  if(!rssSrcs.length){el.innerHTML='<div style="color:var(--muted);font-size:11px;">No sources added yet</div>';return;}
-  const isActive=s=>s.active===true||s.active==='TRUE'||s.active===1||s.active==='1';
-  el.innerHTML=rssSrcs.map(s=>`<div class="src-row"><div class="src-name" title="${s.url}">${s.name}</div><span class="src-league">${s.league}</span><span class="src-status ${isActive(s)?'on':'off'}">${isActive(s)?'ACTIVE':'OFF'}</span><button class="src-del" onclick="delRSSSrc('${s.id}','${s.name}')">REMOVE</button></div>`).join('');
-}
-
-// ── Sidebar + Detail ──
 function renderSidebar(){
-  const el=document.getElementById('sbl');const keys=Object.keys(tracked);document.getElementById('tcount').textContent=keys.length;
-  if(!keys.length){el.innerHTML='<div style="padding:12px;color:var(--muted);font-size:10px;">NO EVENTS TRACKED<br><br>F2 SEATGEEK · F3 TEVO</div>';return;}
-  el.innerHTML=keys.map(k=>{const r=tracked[k];const h=r.history||[];
-    if(!h.length)return`<div class="er src-${r.src.toLowerCase()}${k===selKey?' active':''}" onclick="selectEvent('${k}')"><div style="display:flex;justify-content:space-between;"><div class="er-name">${r.name}</div><span class="spill ${r.src.toLowerCase()}">${r.src}</span></div><div class="er-meta">${(r.venue||'').replace(/_/g,' ').substring(0,26)}</div><div class="er-r2"><span style="color:var(--muted);font-size:10px;">LOADING...</span></div></div>`;
-    const lat=h[h.length-1];const prev=h.length>1?h[h.length-2]:null;const fd=prev?lat.floor-prev.floor:0;
+  const el=document.getElementById('sbl'); const keys=Object.keys(tracked);
+  document.getElementById('tcount').textContent=keys.length;
+  if(!keys.length){ el.innerHTML='<div style="padding:12px;color:var(--muted);font-size:10px;">NO EVENTS TRACKED<br><br>F2 SEATGEEK · F3 TEVO</div>'; return; }
+  el.innerHTML=keys.map(k=>{
+    const r=tracked[k]; const h=r.history||[];
+    if(!h.length) return`<div class="er src-${r.src.toLowerCase()}${k===selKey?' active':''}" onclick="selectEvent('${k}')"><div style="display:flex;justify-content:space-between;"><div class="er-name">${r.name}</div><span class="spill ${r.src.toLowerCase()}">${r.src}</span></div><div class="er-meta">${(r.venue||'').replace(/_/g,' ').substring(0,26)}</div><div class="er-r2"><span style="color:var(--muted);font-size:10px;">LOADING...</span></div></div>`;
+    const lat=h[h.length-1],prev=h.length>1?h[h.length-2]:null,fd=prev?lat.floor-prev.floor:0;
     return`<div class="er src-${r.src.toLowerCase()}${k===selKey?' active':''}" onclick="selectEvent('${k}')"><div style="display:flex;justify-content:space-between;align-items:flex-start;"><div class="er-name" title="${r.name}">${r.name}</div><span class="spill ${r.src.toLowerCase()}">${r.src}</span></div><div class="er-meta">${(r.venue||'').replace(/_/g,' ').substring(0,26)}</div><div class="er-r2"><span class="er-floor">${fmt(lat.floor)}</span><span style="font-size:10px;">${dHtml(fd,false)}</span><span class="sct">${h.length}×</span><span class="elst"><span>${fmtC(lat.count)}</span> LST</span></div></div>`;
   }).join('');
 }
-function selectEvent(key){selKey=key;renderSidebar();renderDetail(key);showPanel('detail',document.querySelectorAll('.fkey')[0]);}
+function selectEvent(key){ selKey=key; renderSidebar(); renderDetail(key); showPanel('detail',document.querySelectorAll('.fkey')[0]); }
 function renderDetail(key){
-  const r=tracked[key];if(!r)return;
-  const h=r.history||[];const isSG=r.src==='SG';const lat=h.length?h[h.length-1]:null;const prev=h.length>1?h[h.length-2]:null;
-  const bn=document.getElementById('det-banner');bn.className=`banner ${isSG?'sg':'te'}`;
-  document.getElementById('det-bdot').className=`bdot ${isSG?'sg':'te'}`;
-  const lbl=document.getElementById('det-blbl');lbl.textContent=isSG?'SEATGEEK':'TICKET EVOLUTION';lbl.className=`blbl ${isSG?'sg':'te'}`;
+  const r=tracked[key]; if(!r)return;
+  const h=r.history||[],isSG=r.src==='SG',lat=h.length?h[h.length-1]:null,prev=h.length>1?h[h.length-2]:null;
+  document.getElementById('det-banner').className=`banner ${isSG?'sg':'te'}`;
+  document.getElementById('det-bdot').style.background=isSG?'var(--sg)':'var(--te)';
+  const lbl=document.getElementById('det-blbl'); lbl.textContent=isSG?'SEATGEEK':'TICKET EVOLUTION'; lbl.className=`blbl ${isSG?'sg':'te'}`;
   document.getElementById('det-bmeta').textContent=isSG?'Listings API v2 · via GAS':'Listings v9 · HMAC via GAS';
   document.getElementById('det-title').textContent=r.name;
   document.getElementById('det-meta').textContent=`${(r.venue||'').replace(/_/g,' ')} · ${(r.performer||'').replace(/_/g,' ')}${r.date?' · '+new Date(r.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):''}`;
-  const pill=document.getElementById('lst-pill');const pd=document.getElementById('lst-delta');
+  const pill=document.getElementById('lst-pill'),pd=document.getElementById('lst-delta');
   if(lat){
-    pill.style.display='inline-block';pill.textContent=`${fmtC(lat.count)} LST`;
-    pill.style.borderColor=isSG?'var(--sg)':'var(--te)';pill.style.color=isSG?'var(--sg)':'var(--te)';
+    pill.style.display='inline-block'; pill.textContent=`${fmtC(lat.count)} LST`;
+    pill.style.borderColor=isSG?'var(--sg)':'var(--te)'; pill.style.color=isSG?'var(--sg)':'var(--te)';
     if(prev){pd.style.display='inline-block';pd.innerHTML=dHtml(lat.count-prev.count,true);}else pd.style.display='none';
-    const sv=(id,v,d)=>{document.getElementById(id).textContent=v;document.getElementById(id+'d').innerHTML=d;};
+    const sv=(id,v,d)=>{ document.getElementById(id).textContent=v; document.getElementById(id+'d').innerHTML=d; };
     sv('m-f',fmt(lat.floor),prev?dHtml(lat.floor-prev.floor,false):'<span style="color:var(--muted)">FIRST</span>');
-    sv('m-a',fmt(lat.avg),prev?dHtml(lat.avg-prev.avg,false):'<span style="color:var(--muted)">—</span>');
+    sv('m-a',fmt(lat.avg),  prev?dHtml(lat.avg-prev.avg,false):'<span style="color:var(--muted)">—</span>');
     sv('m-m',fmt(lat.median),prev?dHtml(lat.median-prev.median,false):'<span style="color:var(--muted)">—</span>');
-    sv('m-x',fmt(lat.max),prev?dHtml(lat.max-prev.max,false):'<span style="color:var(--muted)">—</span>');
+    sv('m-x',fmt(lat.max),  prev?dHtml(lat.max-prev.max,false):'<span style="color:var(--muted)">—</span>');
     sv('m-c',fmtC(lat.count),prev?dHtml(lat.count-prev.count,true):'<span style="color:var(--muted)">FIRST</span>');
   }
-  document.getElementById('btn-ref').disabled=false;document.getElementById('btn-rem').disabled=false;
-  const si=document.getElementById('snapinfo');si.style.display='flex';
+  document.getElementById('btn-ref').disabled=false; document.getElementById('btn-rem').disabled=false;
+  const si=document.getElementById('snapinfo'); si.style.display='flex';
   document.getElementById('snap-l').textContent=`${h.length} SNAPSHOT${h.length!==1?'S':''}`;
   document.getElementById('snap-r').textContent=r.lastUpdate?`UPDATED: ${new Date(r.lastUpdate).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}`: '—';
   renderChart(r);
 }
-function togS(s,el){son[s]=!son[s];const cls={floor:'of',med:'om',avg:'oa',max:'ox'};son[s]?el.classList.add(cls[s]):el.classList.remove(cls[s]);if(selKey&&cmode==='price')renderChart(tracked[selKey]);const a=Object.keys(son).filter(k=>son[k]).map(k=>k.toUpperCase());document.getElementById('clbl').textContent=a.length?a.join(' · ')+' — PER SNAPSHOT':'(SELECT A SERIES)';}
-function switchMode(mode,el){cmode=mode;document.querySelectorAll('.ctab').forEach(t=>t.classList.remove('active'));el.classList.add('active');document.getElementById('stgl').style.display=mode==='price'?'flex':'none';if(mode!=='price')document.getElementById('clbl').textContent='LISTING COUNT — PER SNAPSHOT';else{const a=Object.keys(son).filter(k=>son[k]).map(k=>k.toUpperCase());document.getElementById('clbl').textContent=a.length?a.join(' · ')+' — PER SNAPSHOT':'(SELECT A SERIES)';}if(selKey)renderChart(tracked[selKey]);}
+function togS(s,el){ son[s]=!son[s]; const cls={floor:'of',med:'om',avg:'oa',max:'ox'}; son[s]?el.classList.add(cls[s]):el.classList.remove(cls[s]); if(selKey&&cmode==='price')renderChart(tracked[selKey]); const a=Object.keys(son).filter(k=>son[k]).map(k=>k.toUpperCase()); document.getElementById('clbl').textContent=a.length?a.join(' · ')+' — PER SNAPSHOT':'(SELECT A SERIES)'; }
+function switchMode(mode,el){ cmode=mode; document.querySelectorAll('.ctab').forEach(t=>t.classList.remove('active')); el.classList.add('active'); document.getElementById('stgl').style.display=mode==='price'?'flex':'none'; document.getElementById('clbl').textContent=mode==='price'?(Object.keys(son).filter(k=>son[k]).map(k=>k.toUpperCase()).join(' · ')||'(SELECT)')+' — PER SNAPSHOT':'LISTING COUNT — PER SNAPSHOT'; if(selKey)renderChart(tracked[selKey]); }
 function renderChart(r){
-  const canvas=document.getElementById('main-ch');const empty=document.getElementById('empty-ch');const h=r.history||[];
+  const canvas=document.getElementById('main-ch'),empty=document.getElementById('empty-ch'),h=r.history||[];
   if(!h.length){canvas.style.display='none';empty.style.display='flex';return;}
   canvas.style.display='block';empty.style.display='none';
   const labels=h.map(s=>{const d=new Date(s.ts);return`${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;});
   if(chart){chart.destroy();chart=null;}
-  const base={responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{color:'#5A7A60',font:{family:"'IBM Plex Mono','Courier New',monospace",size:10},boxWidth:12,padding:14}},tooltip:{backgroundColor:'#0E1410',borderColor:'#1E2E22',borderWidth:1,titleColor:'#FFB300',bodyColor:'#E8F0E8',padding:10,titleFont:{family:"'IBM Plex Mono','Courier New',monospace",size:11},bodyFont:{family:"'IBM Plex Mono','Courier New',monospace",size:11}}},scales:{x:{ticks:{color:'#5A7A60',font:{family:"'IBM Plex Mono','Courier New',monospace",size:9},maxRotation:45},grid:{color:'#1A2420'},border:{color:'#1E2E22'}},y:{ticks:{color:'#5A7A60',font:{family:"'IBM Plex Mono','Courier New',monospace",size:10}},grid:{color:'#1A2420'},border:{color:'#1E2E22'}}}};
+  const base={responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+    plugins:{legend:{labels:{color:'#5A7A60',font:{family:"'IBM Plex Mono',monospace",size:10},boxWidth:12,padding:14}},
+      tooltip:{backgroundColor:'#0E1410',borderColor:'#1E2E22',borderWidth:1,titleColor:'#FFB300',bodyColor:'#E8F0E8',padding:10,titleFont:{family:"'IBM Plex Mono',monospace",size:11},bodyFont:{family:"'IBM Plex Mono',monospace",size:11}}},
+    scales:{x:{ticks:{color:'#5A7A60',font:{family:"'IBM Plex Mono',monospace",size:9},maxRotation:45},grid:{color:'#1A2420'},border:{color:'#1E2E22'}},y:{ticks:{color:'#5A7A60',font:{family:"'IBM Plex Mono',monospace",size:10}},grid:{color:'#1A2420'},border:{color:'#1E2E22'}}}};
   if(cmode==='price'){
-    base.scales.y.ticks.callback=v=>'$'+v.toLocaleString();base.plugins.tooltip.callbacks={label:ctx=>` ${ctx.dataset.label}: $${ctx.parsed.y.toLocaleString()}`};
+    base.scales.y.ticks.callback=v=>'$'+v.toLocaleString();
+    base.plugins.tooltip.callbacks={label:ctx=>` ${ctx.dataset.label}: $${ctx.parsed.y.toLocaleString()}`};
     const ds=[];
-    if(son.floor)ds.push({label:'FLOOR',data:h.map(s=>s.floor),borderColor:'#00E5FF',backgroundColor:'rgba(0,229,255,0.05)',tension:0.3,pointRadius:4,pointHoverRadius:6,fill:true,borderWidth:1.5});
-    if(son.med)ds.push({label:'MEDIAN',data:h.map(s=>s.median),borderColor:'#CE93D8',backgroundColor:'rgba(206,147,216,0.05)',tension:0.3,pointRadius:4,pointHoverRadius:6,fill:!son.floor,borderWidth:2});
-    if(son.avg)ds.push({label:'AVG',data:h.map(s=>s.avg),borderColor:'#FFB300',tension:0.3,pointRadius:3,pointHoverRadius:5,fill:false,borderWidth:1.5,borderDash:[4,3]});
-    if(son.max)ds.push({label:'MAX',data:h.map(s=>s.max),borderColor:'#FF1744',tension:0.3,pointRadius:3,pointHoverRadius:5,fill:false,borderWidth:1,borderDash:[2,4]});
+    if(son.floor)ds.push({label:'FLOOR',data:h.map(s=>s.floor),borderColor:'#00E5FF',backgroundColor:'rgba(0,229,255,0.05)',tension:0.3,pointRadius:4,fill:true,borderWidth:1.5});
+    if(son.med)  ds.push({label:'MEDIAN',data:h.map(s=>s.median),borderColor:'#CE93D8',backgroundColor:'rgba(206,147,216,0.05)',tension:0.3,pointRadius:4,fill:!son.floor,borderWidth:2});
+    if(son.avg)  ds.push({label:'AVG',data:h.map(s=>s.avg),borderColor:'#FFB300',tension:0.3,pointRadius:3,fill:false,borderWidth:1.5,borderDash:[4,3]});
+    if(son.max)  ds.push({label:'MAX',data:h.map(s=>s.max),borderColor:'#FF1744',tension:0.3,pointRadius:3,fill:false,borderWidth:1,borderDash:[2,4]});
     chart=new Chart(canvas,{type:'line',data:{labels,datasets:ds},options:base});
-  }else{
-    base.scales.y.ticks.callback=v=>v.toLocaleString();base.plugins.tooltip.callbacks={label:ctx=>` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()}`};
+  } else {
+    base.scales.y.ticks.callback=v=>v.toLocaleString();
+    base.plugins.tooltip.callbacks={label:ctx=>` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()}`};
     chart=new Chart(canvas,{type:'bar',data:{labels,datasets:[{label:'LISTINGS',data:h.map(s=>s.count),backgroundColor:'rgba(165,214,167,0.2)',borderColor:'#A5D6A7',borderWidth:1.5,borderRadius:2}]},options:base});
   }
 }
-async function refreshSelected(){if(!selKey)return;const r=tracked[selKey];if(!r)return;setSt(`REFRESHING ${r.name}...`);if(r.src==='SG'){document.getElementById('sg-id').value=r.event_id;await fetchSG();}else await fetchTE(r.event_id,r.name,r.venue,r.performer,r.date);renderDetail(selKey);}
-async function removeSelected(){if(!selKey)return;try{await gasPost({action:'untrack',key:selKey});}catch(e){}delete tracked[selKey];selKey=null;renderSidebar();updateTotal();document.getElementById('det-title').textContent='SELECT AN EVENT';document.getElementById('det-meta').textContent='—';document.getElementById('lst-pill').style.display='none';document.getElementById('lst-delta').style.display='none';document.getElementById('btn-ref').disabled=true;document.getElementById('btn-rem').disabled=true;document.getElementById('empty-ch').style.display='flex';document.getElementById('main-ch').style.display='none';document.getElementById('snapinfo').style.display='none';['m-f','m-a','m-m','m-x','m-c'].forEach(id=>{document.getElementById(id).textContent='—';document.getElementById(id+'d').textContent='—';});if(chart){chart.destroy();chart=null;}toast('REMOVED');setSt('READY');}
-async function refreshAll(el){const keys=Object.keys(tracked);if(!keys.length){toast('NOTHING TO REFRESH','err');return;}el.innerHTML='<span>F9</span>REFRESHING...';el.style.pointerEvents='none';for(const k of keys){selKey=k;await refreshSelected();}if(keys.length)selectEvent(keys[keys.length-1]);el.innerHTML='<span>F9</span>REFRESH ALL';el.style.pointerEvents='auto';toast(`${keys.length} REFRESHED`);setSt('REFRESH COMPLETE');}
-function updateTotal(){const t=Object.values(tracked).reduce((a,r)=>a+(r.history||[]).length,0);document.getElementById('snaptotal').textContent=`${t} SNAPSHOT${t!==1?'S':''}`;}
+function updateTotal(){ const t=Object.values(tracked).reduce((a,r)=>a+(r.history||[]).length,0); document.getElementById('snaptotal').textContent=`${t} SNAPSHOT${t!==1?'S':''}`; }
+async function refreshSelected(){ if(!selKey)return; const r=tracked[selKey]; if(!r)return; setSt(`REFRESHING ${r.name}...`); if(r.src==='SG'){document.getElementById('sg-id').value=r.event_id;await fetchSG();}else await fetchTE(r.event_id,r.name,r.venue,r.performer,r.date); renderDetail(selKey); }
+async function removeSelected(){
+  if(!selKey)return; try{await gasPost({action:'untrack',key:selKey});}catch(e){}
+  delete tracked[selKey]; selKey=null; renderSidebar(); updateTotal();
+  ['det-title','det-meta'].forEach((id,i)=>{document.getElementById(id).textContent=i?'—':'SELECT AN EVENT';});
+  ['lst-pill','lst-delta'].forEach(id=>document.getElementById(id).style.display='none');
+  document.getElementById('btn-ref').disabled=true; document.getElementById('btn-rem').disabled=true;
+  document.getElementById('empty-ch').style.display='flex'; document.getElementById('main-ch').style.display='none';
+  document.getElementById('snapinfo').style.display='none';
+  ['m-f','m-a','m-m','m-x','m-c'].forEach(id=>{document.getElementById(id).textContent='—';document.getElementById(id+'d').textContent='—';});
+  if(chart){chart.destroy();chart=null;} toast('REMOVED'); setSt('READY');
+}
+async function refreshAll(el){
+  const keys=Object.keys(tracked); if(!keys.length){toast('NOTHING TO REFRESH','err');return;}
+  el.innerHTML='<span>F9</span>REFRESHING...'; el.style.pointerEvents='none';
+  for(const k of keys){selKey=k;await refreshSelected();}
+  if(keys.length)selectEvent(keys[keys.length-1]);
+  el.innerHTML='<span>F9</span>REFRESH ALL'; el.style.pointerEvents='auto';
+  toast(`${keys.length} REFRESHED`); setSt('REFRESH COMPLETE');
+}
 
 // ================================================================
-// F5 THEME ENGINE
+// F2 — SEATGEEK
 // ================================================================
-const TKEY='s4k_theme_v1';
+async function fetchSG(){
+  const c=getCreds(); if(!c.gas){toast('ADD GAS URL — F8','err');return;}
+  const id=document.getElementById('sg-id').value.trim(); if(!id){toast('ENTER EVENT ID','err');return;}
+  const st=document.getElementById('sg-st'); st.textContent='FETCHING VIA GAS...'; st.style.color='var(--amber)'; setSt('FETCHING SEATGEEK...');
+  try{
+    const d=await gasGet({action:'fetch_sg',event_id:id});
+    if(d.error){st.textContent=`ERROR: ${d.error}`;st.style.color='var(--red)';return;}
+    const key=await saveSnap('SG',d.event.venue,d.event.performer,id,d.event.name,d.event.date,d.stats);
+    st.textContent=`TRACKED · ${fmtC(d.stats.count)} LISTINGS · SAVED`; st.style.color='var(--green)';
+    toast('TRACKED + SAVED'); setSt(`ADDED: ${d.event.name}`); selectEvent(key); document.getElementById('sg-id').value='';
+  }catch(e){st.textContent=`FAILED: ${e.message}`;st.style.color='var(--red)';}
+}
+
+// ================================================================
+// F3 — TICKET EVOLUTION
+// ================================================================
+async function searchTE(){
+  const c=getCreds(); if(!c.gas){toast('ADD GAS URL — F8','err');return;}
+  const q=document.getElementById('te-q').value.trim(); if(!q){toast('ENTER QUERY','err');return;}
+  const st=document.getElementById('te-st'),dd=document.getElementById('te-dd');
+  st.textContent='SEARCHING...'; st.style.color='var(--amber)'; dd.style.display='none';
+  try{
+    const d=await gasGet({action:'search_te',q});
+    if(d.error){st.textContent=`ERROR: ${d.error}`;st.style.color='var(--red)';return;}
+    if(!d.events?.length){st.textContent='NO EVENTS FOUND';st.style.color='var(--red)';return;}
+    st.textContent=`${d.events.length} RESULTS — SELECT ONE`; st.style.color='var(--green)';
+    dd.style.display='block';
+    dd.innerHTML=d.events.map(ev=>`<div class="ddi" onclick="fetchTE('${ev.id}','${(ev.name||'').replace(/['"]/g,'')}','${(ev.venue?.name||'UNKNOWN').replace(/['"]/g,'')}','${(ev.performances?.[0]?.performer?.name||'UNKNOWN').replace(/['"]/g,'')}','${ev.occurs_at||''}')"><div class="ddn2">${ev.name||'UNNAMED'}</div><div class="ddm">${ev.venue?.name||''} · ${ev.occurs_at?new Date(ev.occurs_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):''}</div></div>`).join('');
+  }catch(e){st.textContent=`FAILED: ${e.message}`;st.style.color='var(--red)';}
+}
+async function fetchTE(eid,name,venue,perf,date){
+  document.getElementById('te-dd').style.display='none';
+  const c=getCreds(); if(!c.gas){toast('ADD GAS URL — F8','err');return;}
+  const st=document.getElementById('te-st'); st.textContent=`FETCHING ${name}...`; st.style.color='var(--amber)'; setSt('FETCHING TEVO...');
+  try{
+    const d=await gasGet({action:'fetch_te',event_id:eid,name:encodeURIComponent(name),venue:encodeURIComponent(venue),performer:encodeURIComponent(perf),date});
+    if(d.error){st.textContent=`ERROR: ${d.error}`;st.style.color='var(--red)';return;}
+    const key=await saveSnap('TE',venue,perf,eid,name,date,d.stats);
+    st.textContent=`TRACKED · ${fmtC(d.stats.count)} LISTINGS · SAVED`; st.style.color='var(--green)';
+    toast('TRACKED + SAVED'); setSt(`ADDED: ${name}`); selectEvent(key); document.getElementById('te-q').value='';
+  }catch(e){st.textContent=`FAILED: ${e.message}`;st.style.color='var(--red)';}
+}
+
+// ================================================================
+// F4 — DEMAND FEED (rss.app webhook-powered)
+// ================================================================
+async function loadFeed(){
+  const btn=document.getElementById('btn-feed-ref'); btn.disabled=true; btn.textContent='FETCHING...'; setSt('FETCHING LIVE FEED...');
+  try{
+    const params={action:'get_rss_live',limit:150};
+    if(lfilt&&lfilt!=='all') params.league=lfilt;
+    const d=await gasGet(params);
+    feedItems=(d.items||[]).map(i=>({title:i.item_title||'',link:i.item_url||'',desc:i.item_description||'',pubDate:i.item_published||i.received_ts||'',source:i.feed_title||'',league:i.feed_league||'General',impact:i.impact||null,category:i.category||null,reason:i.reason||null}));
+    document.getElementById('feed-badge').textContent=`${feedItems.length} ITEMS`;
+    document.getElementById('feed-updated').textContent=`updated ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`;
+    feedItems.length?renderFeed():document.getElementById('feed-list').innerHTML=`<div class="empty"><span style="font-size:16px;color:var(--border);">▬▬▬</span><span>NO ITEMS YET<span class="blink">_</span></span><span style="font-size:10px;">CREATE FEEDS IN MANAGE SOURCES · ITEMS ARRIVE VIA WEBHOOK</span></div>`;
+    setSt('FEED READY');
+  }catch(e){toast(`FEED FAILED: ${e.message}`,'err');setSt('FEED ERROR');}
+  btn.disabled=false; btn.textContent='REFRESH';
+}
+async function scoreLiveFeed(){
+  const btn=document.getElementById('btn-score'); btn.disabled=true; btn.textContent='SCORING...'; setSt('AI SCORING...');
+  try{ const d=await gasPost({action:'score_rss_live'}); if(d.error){toast(`SCORE FAILED: ${d.error}`,'err');}else{toast(`${d.scored||0} ITEMS SCORED`);await loadFeed();} }
+  catch(e){toast(`SCORE FAILED: ${e.message}`,'err');}
+  btn.disabled=false; btn.textContent='SCORE WITH AI'; setSt('READY');
+}
+function setLF(l,el){ lfilt=l; document.querySelectorAll('.feed-bar .fpill').forEach(p=>{if(['ALL','NBA','NFL','NHL','MLB','GENERAL'].includes(p.textContent))p.classList.remove('active');}); el.classList.add('active'); loadFeed(); }
+function setIF(i,el){ ifilt=ifilt===i?null:i; document.querySelectorAll('#f-high,#f-med').forEach(p=>p.classList.remove('active')); if(ifilt)el.classList.add('active'); renderFeed(); }
+function renderFeed(){
+  const kw=(document.getElementById('feed-kw').value||'').toLowerCase();
+  let items=[...feedItems];
+  if(ifilt) items=items.filter(i=>i.impact===ifilt);
+  if(kw) items=items.filter(i=>i.title.toLowerCase().includes(kw)||i.source.toLowerCase().includes(kw)||(i.desc||'').toLowerCase().includes(kw));
+  const el=document.getElementById('feed-list');
+  if(!items.length){el.innerHTML=`<div class="empty" style="height:200px;"><span style="color:var(--muted);font-size:11px;">NO ITEMS MATCH FILTER</span></div>`;return;}
+  el.innerHTML=items.map(item=>`<div class="fi" onclick="${item.link?`window.open('${item.link.replace(/'/g,'')}','_blank')`:''}"><div class="fi-top"><div class="fi-title">${item.title}</div>${item.impact?`<span class="fi-imp ${item.impact}">${item.impact.toUpperCase()}</span>`:''}</div><div class="fi-meta"><span class="fi-src">${item.source}</span><span class="fi-tag">${item.league}</span>${item.category?`<span class="fi-tag" style="color:var(--purple);border-color:var(--purple);">${item.category}</span>`:''}<span class="fi-time">${ago(item.pubDate)}</span></div>${item.desc?`<div class="fi-desc">${item.desc.substring(0,120)}${item.desc.length>120?'...':''}</div>`:''}${item.reason?`<div class="fi-reason">${item.reason}</div>`:''}</div>`).join('');
+}
+function startFeedPoll(){ stopFeedPoll(); feedPollTimer=setInterval(()=>loadFeed(),60000); }
+function stopFeedPoll(){ if(feedPollTimer){clearInterval(feedPollTimer);feedPollTimer=null;} }
+
+async function createRSSFeed(){
+  const type=document.getElementById('rss-type').value,input=document.getElementById('rss-input').value.trim(),league=document.getElementById('rss-league').value;
+  const st=document.getElementById('rss-create-status');
+  if(!input){toast('ENTER A KEYWORD OR URL','err');return;}
+  st.textContent='CREATING IN RSS.APP...'; st.style.color='var(--amber)';
+  try{
+    const payload={league}; if(type==='keyword')payload.keyword=input; else payload.url=input;
+    const d=await gasPost({action:'rss_create_feed',...payload});
+    if(d.error){st.textContent=`ERROR: ${d.error}`;st.style.color='var(--red)';return;}
+    st.textContent=`CREATED: ${d.feed?.title||input}`; st.style.color='var(--green)';
+    document.getElementById('rss-input').value=''; toast('FEED CREATED'); await loadRSSFeeds();
+  }catch(e){st.textContent=`FAILED: ${e.message}`;st.style.color='var(--red)';}
+}
+async function loadRSSFeeds(){
+  const el=document.getElementById('rss-feed-list'); el.innerHTML='<div style="color:var(--muted);font-size:11px;">Loading from rss.app...</div>';
+  try{
+    const d=await gasGet({action:'rss_list_feeds'}); const feeds=d.feeds||[];
+    const c=getCreds(); c._rssCount=feeds.length; localStorage.setItem(CKEY,JSON.stringify(c)); updateSrcBar(c);
+    if(!feeds.length){el.innerHTML='<div style="color:var(--muted);font-size:11px;">No feeds yet — create one above</div>';return;}
+    el.innerHTML=feeds.map(f=>`<div class="src-row"><div class="src-name" title="${f.source_url||''}">${f.title||f.id}</div><span style="font-size:10px;color:${f.is_active?'var(--green)':'var(--muted)'};">${f.is_active?'ACTIVE':'OFF'}</span><a href="${f.rss_feed_url||'#'}" target="_blank" style="font-size:10px;color:var(--rss);text-decoration:none;flex-shrink:0;">RSS ↗</a><button class="src-del" onclick="deleteRSSFeed('${f.id}','${(f.title||f.id).replace(/'/g,'')}')">REMOVE</button></div>`).join('');
+  }catch(e){el.innerHTML=`<div style="color:var(--red);font-size:11px;">FAILED: ${e.message}</div>`;}
+}
+async function deleteRSSFeed(feedId,name){ if(!confirm(`Remove "${name}" from rss.app?`))return; try{await gasPost({action:'rss_delete_feed',feed_id:feedId});toast(`REMOVED: ${name}`);await loadRSSFeeds();}catch(e){toast(`FAILED: ${e.message}`,'err');} }
+function updateRssLabel(){ const t=document.getElementById('rss-type').value,lbl=document.getElementById('rss-input-lbl'),inp=document.getElementById('rss-input'); if(t==='url'){lbl.textContent='WEBSITE URL';inp.placeholder='e.g. https://espn.com/nba';}else{lbl.textContent='KEYWORD OR TOPIC';inp.placeholder='e.g. Lakers injury, NBA trade deadline';} }
+
+// ================================================================
+// F5 — THEME ENGINE
+// ================================================================
 let currentTheme={preset:'default',custom:{},bg:'none',cursor:'default',name:'',marquee:''};
 const PRESETS={
   default:{},
-  matrix:{'--bg':'#000800','--bg2':'#001200','--bg3':'#001A00','--amber':'#00FF41','--amber2':'#00CC33','--green':'#00FF41','--cyan':'#00FF41','--purple':'#00FF41','--white':'#CCFFCC','--muted':'#2A6B2A','--border':'#003300'},
-  myspace:{'--bg':'#220033','--bg2':'#2D0044','--bg3':'#380055','--amber':'#FF00FF','--amber2':'#CC00CC','--green':'#FF00FF','--cyan':'#FF99FF','--purple':'#FF00FF','--white':'#FFD6FF','--muted':'#9933AA','--border':'#550077'},
-  aol:{'--bg':'#000033','--bg2':'#000044','--bg3':'#000055','--amber':'#FFCC00','--amber2':'#FF9900','--green':'#00CC00','--cyan':'#00CCFF','--purple':'#CC99FF','--white':'#EEEEFF','--muted':'#4444AA','--border':'#0000AA'},
-  geocities:{'--bg':'#000000','--bg2':'#0A0A1A','--bg3':'#111122','--amber':'#FF6600','--amber2':'#FF3300','--green':'#FFFF00','--cyan':'#00FFFF','--purple':'#FF00FF','--white':'#FFFFFF','--muted':'#666666','--border':'#333333'},
-  winamp:{'--bg':'#1A1A2E','--bg2':'#16213E','--bg3':'#0F3460','--amber':'#E94560','--amber2':'#C73652','--green':'#00B4D8','--cyan':'#90E0EF','--purple':'#E94560','--white':'#CAF0F8','--muted':'#457B9D','--border':'#1D3557'},
-  livejournal:{'--bg':'#1A0A00','--bg2':'#240E00','--bg3':'#2E1200','--amber':'#FF8C00','--amber2':'#FF6600','--green':'#ADFF2F','--cyan':'#FFD700','--purple':'#FF69B4','--white':'#FFF5E6','--muted':'#7A4A00','--border':'#3D1A00'},
-  xanga:{'--bg':'#0D0D1A','--bg2':'#141428','--bg3':'#1A1A33','--amber':'#66CCFF','--amber2':'#3399FF','--green':'#66FF66','--cyan':'#66CCFF','--purple':'#CC99FF','--white':'#E6F0FF','--muted':'#336699','--border':'#1A3366'}
+  matrix:{'--bg':'#000800','--bg2':'#001200','--bg3':'#001A00','--amber':'#00FF41','--amber2':'#00CC33','--green':'#00FF41','--cyan':'#00FF41','--purple':'#00FF41','--white':'#CCFFCC','--muted':'#2A6B2A','--border':'#003300','--rss':'#00FF41','--sg':'#00FF41','--te':'#00FF41'},
+  myspace:{'--bg':'#220033','--bg2':'#2D0044','--bg3':'#380055','--amber':'#FF00FF','--amber2':'#CC00CC','--green':'#FF00FF','--cyan':'#FF99FF','--purple':'#FF00FF','--white':'#FFD6FF','--muted':'#9933AA','--border':'#550077','--rss':'#FF00FF'},
+  aol:{'--bg':'#000033','--bg2':'#000044','--bg3':'#000055','--amber':'#FFCC00','--amber2':'#FF9900','--green':'#00CC00','--cyan':'#00CCFF','--purple':'#CC99FF','--white':'#EEEEFF','--muted':'#4444AA','--border':'#0000AA','--rss':'#FF6600'},
+  geocities:{'--bg':'#000000','--bg2':'#0A0A1A','--bg3':'#111122','--amber':'#FF6600','--amber2':'#FF3300','--green':'#FFFF00','--cyan':'#00FFFF','--purple':'#FF00FF','--white':'#FFFFFF','--muted':'#666666','--border':'#333333','--rss':'#FF6600'},
+  winamp:{'--bg':'#1A1A2E','--bg2':'#16213E','--bg3':'#0F3460','--amber':'#E94560','--amber2':'#C73652','--green':'#00B4D8','--cyan':'#90E0EF','--purple':'#E94560','--white':'#CAF0F8','--muted':'#457B9D','--border':'#1D3557','--rss':'#E94560'},
+  livejournal:{'--bg':'#1A0A00','--bg2':'#240E00','--bg3':'#2E1200','--amber':'#FF8C00','--amber2':'#FF6600','--green':'#ADFF2F','--cyan':'#FFD700','--purple':'#FF69B4','--white':'#FFF5E6','--muted':'#7A4A00','--border':'#3D1A00','--rss':'#FF8C00'},
+  xanga:{'--bg':'#0D0D1A','--bg2':'#141428','--bg3':'#1A1A33','--amber':'#66CCFF','--amber2':'#3399FF','--green':'#66FF66','--cyan':'#66CCFF','--purple':'#CC99FF','--white':'#E6F0FF','--muted':'#336699','--border':'#1A3366','--rss':'#66CCFF'}
 };
-const BG_MAPS={
-  none:{bg:'',size:''},
-  dots:{bg:'radial-gradient(circle,rgba(255,255,255,0.12) 1px,transparent 1px)',size:'18px 18px'},
-  grid:{bg:'linear-gradient(rgba(255,255,255,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.04) 1px,transparent 1px)',size:'22px 22px'},
-  scanline:{bg:'repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.2) 2px,rgba(0,0,0,0.2) 4px)',size:'auto'},
-  stars:{bg:'radial-gradient(1px 1px at 20% 30%,white,transparent),radial-gradient(1px 1px at 40% 70%,white,transparent),radial-gradient(1px 1px at 60% 20%,white,transparent),radial-gradient(1px 1px at 80% 60%,white,transparent),radial-gradient(1px 1px at 10% 80%,white,transparent)',size:'auto'},
-  diagonal:{bg:'repeating-linear-gradient(45deg,rgba(255,255,255,0.02),rgba(255,255,255,0.02) 1px,transparent 1px,transparent 10px)',size:'auto'},
-  circuit:{bg:'linear-gradient(rgba(0,255,65,0.05) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,65,0.05) 1px,transparent 1px)',size:'40px 40px'},
-  noise:{bg:'',size:''}
-};
+const BG_MAPS={none:{bg:'',size:''},dots:{bg:'radial-gradient(circle,rgba(255,255,255,0.12) 1px,transparent 1px)',size:'18px 18px'},grid:{bg:'linear-gradient(rgba(255,255,255,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.04) 1px,transparent 1px)',size:'22px 22px'},scanline:{bg:'repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.2) 2px,rgba(0,0,0,0.2) 4px)',size:'auto'},stars:{bg:'radial-gradient(1px 1px at 20% 30%,white,transparent),radial-gradient(1px 1px at 40% 70%,white,transparent),radial-gradient(1px 1px at 60% 20%,white,transparent),radial-gradient(1px 1px at 80% 60%,white,transparent)',size:'auto'},diagonal:{bg:'repeating-linear-gradient(45deg,rgba(255,255,255,0.02),rgba(255,255,255,0.02) 1px,transparent 1px,transparent 10px)',size:'auto'},circuit:{bg:'linear-gradient(rgba(0,255,65,0.05) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,65,0.05) 1px,transparent 1px)',size:'40px 40px'},noise:{bg:'',size:''}};
 
-function applyPreset(name,el){
-  currentTheme.preset=name;currentTheme.custom={};
-  document.querySelectorAll('.theme-card').forEach(c=>c.classList.remove('active'));
-  if(el)el.classList.add('active');
-  const root=document.documentElement;
-  Object.keys(PRESETS.matrix).forEach(v=>root.style.removeProperty(v));
-  Object.entries(PRESETS[name]||{}).forEach(([k,v])=>root.style.setProperty(k,v));
-  syncColorPickers();
-}
-function applyCustomColor(v,val){currentTheme.custom[v]=val;document.documentElement.style.setProperty(v,val);}
-function syncColorPickers(){
-  const s=getComputedStyle(document.documentElement);
-  const m={'--bg':'c-bg','--bg2':'c-bg2','--amber':'c-amber','--white':'c-white','--sg':'c-sg','--te':'c-te','--border':'c-border','--muted':'c-muted'};
-  Object.entries(m).forEach(([v,id])=>{const el=document.getElementById(id);if(!el)return;const val=s.getPropertyValue(v).trim();if(val.startsWith('#')&&val.length>=7)el.value=val.substring(0,7);});
-}
-function applyBG(name,el){
-  currentTheme.bg=name;
-  document.querySelectorAll('.bg-card').forEach(c=>c.classList.remove('active'));if(el)el.classList.add('active');
-  const p=BG_MAPS[name]||BG_MAPS.none;const t=document.querySelector('.terminal');
-  t.style.backgroundImage=p.bg;t.style.backgroundSize=p.size;
-}
-function applyCursor(name,el){
-  currentTheme.cursor=name;
-  document.querySelectorAll('.cur-card').forEach(c=>c.classList.remove('active'));if(el)el.classList.add('active');
-  document.body.style.cursor=name==='none'?'none':name;
-}
-function applyTermName(val){
-  currentTheme.name=val;const d=val.trim()||'S4K TERMINAL';
-  const tb=document.querySelector('.topbar span');
-  if(tb)tb.innerHTML=`${d.toUpperCase()} <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v2.0</span>`;
-  document.title=val.trim()||'S4K Terminal';
-}
-function applyMarquee(val){
-  currentTheme.marquee=val;const p=document.getElementById('marquee-preview');const inn=document.getElementById('marquee-inner');
-  if(!val.trim()){p.style.display='none';removeMarqueeBar();return;}
-  p.style.display='block';inn.textContent=val;applyMarqueeBar(val);
-}
-function applyMarqueeBar(text){
-  removeMarqueeBar();if(!text)return;
-  const bar=document.createElement('div');bar.id='marquee-bar';
-  bar.style.cssText='overflow:hidden;border-bottom:1px solid var(--border);padding:3px 0;background:var(--bg2);flex-shrink:0;';
-  bar.innerHTML=`<div style="white-space:nowrap;font-size:10px;color:var(--amber);animation:marquee 14s linear infinite;display:inline-block;padding-left:100%;letter-spacing:0.1em;">${text}</div>`;
-  document.querySelector('.statusbar').insertAdjacentElement('afterend',bar);
-}
-function removeMarqueeBar(){const el=document.getElementById('marquee-bar');if(el)el.remove();}
-function saveTheme(){localStorage.setItem(TKEY,JSON.stringify(currentTheme));toast('THEME SAVED');}
-function resetTheme(){
-  currentTheme={preset:'default',custom:{},bg:'none',cursor:'default',name:'',marquee:''};
-  applyPreset('default',document.getElementById('preset-default'));
-  applyBG('none',document.getElementById('bg-none'));
-  applyCursor('default',document.getElementById('cur-default'));
-  document.getElementById('term-name').value='';document.getElementById('marquee-text').value='';
-  applyTermName('');applyMarquee('');document.body.style.cursor='';
-  localStorage.removeItem(TKEY);toast('THEME RESET');
-}
-function loadTheme(){
-  try{
-    const saved=JSON.parse(localStorage.getItem(TKEY)||'null');if(!saved)return;
-    currentTheme=saved;
-    applyPreset(saved.preset||'default',document.getElementById(`preset-${saved.preset||'default'}`));
-    Object.entries(saved.custom||{}).forEach(([k,v])=>document.documentElement.style.setProperty(k,v));
-    if(saved.bg)applyBG(saved.bg,document.getElementById(`bg-${saved.bg}`));
-    if(saved.cursor)applyCursor(saved.cursor,document.getElementById(`cur-${saved.cursor}`));
-    if(saved.name){document.getElementById('term-name').value=saved.name;applyTermName(saved.name);}
-    if(saved.marquee){document.getElementById('marquee-text').value=saved.marquee;applyMarqueeBar(saved.marquee);}
-    syncColorPickers();
-  }catch(e){}
-}
+function applyPreset(name,el){ currentTheme.preset=name;currentTheme.custom={}; document.querySelectorAll('.theme-card').forEach(c=>c.classList.remove('active')); if(el)el.classList.add('active'); const root=document.documentElement; Object.keys(PRESETS.matrix).forEach(v=>root.style.removeProperty(v)); Object.entries(PRESETS[name]||{}).forEach(([k,v])=>root.style.setProperty(k,v)); syncColorPickers(); }
+function applyCustomColor(v,val){ currentTheme.custom[v]=val; document.documentElement.style.setProperty(v,val); }
+function syncColorPickers(){ const s=getComputedStyle(document.documentElement); const m={'--bg':'c-bg','--bg2':'c-bg2','--amber':'c-amber','--white':'c-white','--sg':'c-sg','--te':'c-te','--border':'c-border','--muted':'c-muted'}; Object.entries(m).forEach(([v,id])=>{const el=document.getElementById(id);if(!el)return;const val=s.getPropertyValue(v).trim();if(val.startsWith('#')&&val.length>=7)el.value=val.substring(0,7);}); }
+function applyBG(name,el){ currentTheme.bg=name; document.querySelectorAll('.bg-card').forEach(c=>c.classList.remove('active')); if(el)el.classList.add('active'); const p=BG_MAPS[name]||BG_MAPS.none,t=document.querySelector('.terminal'); t.style.backgroundImage=p.bg; t.style.backgroundSize=p.size; }
+function applyCursor(name,el){ currentTheme.cursor=name; document.querySelectorAll('.cur-card').forEach(c=>c.classList.remove('active')); if(el)el.classList.add('active'); document.body.style.cursor=name==='none'?'none':name; }
+function applyTermName(val){ currentTheme.name=val; const d=val.trim()||'S4K TERMINAL'; document.getElementById('term-title').innerHTML=`${d.toUpperCase()} <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.0</span>`; document.title=val.trim()||'S4K Terminal'; }
+function applyMarquee(val){ currentTheme.marquee=val; const p=document.getElementById('marquee-preview'),inn=document.getElementById('marquee-inner'); if(!val.trim()){p.style.display='none';removeMarqueeBar();return;} p.style.display='block';inn.textContent=val;applyMarqueeBar(val); }
+function applyMarqueeBar(text){ removeMarqueeBar();if(!text)return; const bar=document.createElement('div');bar.id='marquee-bar';bar.style.cssText='overflow:hidden;border-bottom:1px solid var(--border);padding:3px 0;background:var(--bg2);flex-shrink:0;';bar.innerHTML=`<div style="white-space:nowrap;font-size:10px;color:var(--amber);animation:marquee 14s linear infinite;display:inline-block;padding-left:100%;letter-spacing:0.1em;">${text}</div>`;document.querySelector('.statusbar').insertAdjacentElement('afterend',bar); }
+function removeMarqueeBar(){ const el=document.getElementById('marquee-bar');if(el)el.remove(); }
+function saveTheme(){ localStorage.setItem(TKEY,JSON.stringify(currentTheme));toast('THEME SAVED'); }
+function resetTheme(){ currentTheme={preset:'default',custom:{},bg:'none',cursor:'default',name:'',marquee:''}; applyPreset('default',document.getElementById('preset-default'));applyBG('none',document.getElementById('bg-none'));applyCursor('default',document.getElementById('cur-default'));document.getElementById('term-name').value='';document.getElementById('marquee-text').value='';applyTermName('');applyMarquee('');document.body.style.cursor='';localStorage.removeItem(TKEY);toast('THEME RESET'); }
+function loadTheme(){ try{ const saved=JSON.parse(localStorage.getItem(TKEY)||'null');if(!saved)return;currentTheme=saved;applyPreset(saved.preset||'default',document.getElementById(`preset-${saved.preset||'default'}`));Object.entries(saved.custom||{}).forEach(([k,v])=>document.documentElement.style.setProperty(k,v));if(saved.bg)applyBG(saved.bg,document.getElementById(`bg-${saved.bg}`));if(saved.cursor)applyCursor(saved.cursor,document.getElementById(`cur-${saved.cursor}`));if(saved.name){document.getElementById('term-name').value=saved.name;applyTermName(saved.name);}if(saved.marquee){document.getElementById('marquee-text').value=saved.marquee;applyMarqueeBar(saved.marquee);}syncColorPickers();}catch(e){} }
 
 // ================================================================
-// F6 INTELLIGENCE
+// F6 — INTELLIGENCE
 // ================================================================
-let intelItems=[], intelTypeFilter='all', chatHistory=[], chatWaiting=false;
-
-function switchIntelTab(tab,el){
-  document.querySelectorAll('.itab').forEach(t=>t.classList.remove('active'));el.classList.add('active');
-  document.querySelectorAll('.intel-panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById(`intel-${tab}`).classList.add('active');
-  if(tab==='feed')loadIntelFeed();
-}
-
+function switchIntelTab(tab,el){ document.querySelectorAll('.itab').forEach(t=>t.classList.remove('active'));el.classList.add('active');document.querySelectorAll('.intel-panel').forEach(p=>p.classList.remove('active'));document.getElementById(`intel-${tab}`).classList.add('active');if(tab==='feed')loadIntelFeed(); }
 async function loadIntelFeed(){
   setSt('LOADING INTELLIGENCE FEED...');
   try{
-    const d=await gasGet({action:'get_feed',limit:100});
-    intelItems=d.items||[];
+    const d=await gasGet({action:'get_feed',limit:100}); intelItems=d.items||[];
     const unread=intelItems.filter(i=>!i.read||i.read==='false'||i.read===false).length;
-    const badge=document.getElementById('unread-badge');
-    if(unread>0){badge.textContent=unread;badge.style.display='inline-block';}
-    else badge.style.display='none';
-    renderIntelFeed();
-    setSt('INTELLIGENCE READY');
+    const badge=document.getElementById('unread-badge'); if(unread>0){badge.textContent=unread;badge.style.display='inline-block';}else badge.style.display='none';
+    renderIntelFeed(); setSt('INTELLIGENCE READY');
   }catch(e){setSt('INTELLIGENCE FEED ERROR');}
 }
-
-function setFeedType(type,el){
-  intelTypeFilter=type;
-  document.querySelectorAll('.intel-toolbar .fpill').forEach(p=>p.classList.remove('active'));
-  el.classList.add('active');
-  renderIntelFeed();
-}
-
+function setIntelType(type,el){ intelTypeFilter=type; document.querySelectorAll('.intel-toolbar .fpill').forEach(p=>p.classList.remove('active'));el.classList.add('active'); renderIntelFeed(); }
 function renderIntelFeed(){
   const el=document.getElementById('intel-feed-list');
-  let items=[...intelItems];
-  if(intelTypeFilter!=='all')items=items.filter(i=>i.type===intelTypeFilter);
-  document.getElementById('feed-item-count').textContent=`${items.length} item${items!==1?'s':''}`;
-  if(!items.length){
-    el.innerHTML=`<div class="empty" style="height:200px;"><span style="color:var(--muted);font-size:11px;">NO ${intelTypeFilter.toUpperCase()} ITEMS YET</span></div>`;
-    return;
-  }
+  let items=[...intelItems]; if(intelTypeFilter!=='all')items=items.filter(i=>i.type===intelTypeFilter);
+  document.getElementById('intel-count').textContent=`${items.length} item${items.length!==1?'s':''}`;
+  if(!items.length){el.innerHTML=`<div class="empty" style="height:200px;"><span style="color:var(--muted);font-size:11px;">NO ${intelTypeFilter.toUpperCase()} ITEMS YET</span></div>`;return;}
   el.innerHTML=items.map(item=>{
-    const isRead=item.read===true||item.read==='true'||item.read===1;
-    const isSaved=item.saved===true||item.saved==='true'||item.saved===1;
-    const body=(item.body||'').substring(0,300);
-    return`<div class="icard type-${item.type}" id="icard-${item.id}" onclick="expandCard('${item.id}')" style="opacity:${isRead?'0.65':'1'}">
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-        <span class="icard-type ${item.type}">${(item.type||'').toUpperCase()}</span>
-        ${item.severity&&item.severity!=='info'?`<span class="isev ${item.severity}">${item.severity.toUpperCase()}</span>`:''}
-        ${item.event_name&&item.event_name!=='ALL EVENTS'?`<span style="font-size:10px;color:var(--muted);">${item.event_name}</span>`:''}
-        <span class="icard-time">${ago(item.ts)}</span>
-      </div>
+    const isRead=item.read===true||item.read==='true',isSaved=item.saved===true||item.saved==='true';
+    return`<div class="icard type-${item.type}" onclick="expandCard('body-${item.id}')" style="opacity:${isRead?'0.6':'1'}">
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><span class="icard-type ${item.type}">${(item.type||'').toUpperCase()}</span>${item.severity&&item.severity!=='info'?`<span class="isev ${item.severity}">${item.severity.toUpperCase()}</span>`:''} ${item.event_name&&item.event_name!=='ALL EVENTS'?`<span style="font-size:10px;color:var(--muted);">${item.event_name}</span>`:''}<span class="icard-time">${ago(item.ts)}</span></div>
       <div class="icard-title">${item.title||'Untitled'}</div>
-      <div class="icard-body collapsed" id="body-${item.id}">${body}${(item.body||'').length>300?'...':''}</div>
-      <div class="icard-actions" onclick="event.stopPropagation()">
-        <button class="iact" onclick="markRead('${item.id}')">MARK READ</button>
-        <button class="iact ${isSaved?'saved':''}" onclick="saveItem('${item.id}')">${isSaved?'SAVED':'SAVE'}</button>
-        <button class="iact" onclick="askAboutItem('${item.id}')">ASK AI ↗</button>
-      </div>
+      <div class="icard-body" id="body-${item.id}">${(item.body||'').replace(/\n/g,'<br>')}</div>
+      <div class="icard-actions" onclick="event.stopPropagation()"><button class="iact" onclick="markRead('${item.id}')">MARK READ</button><button class="iact ${isSaved?'saved':''}" onclick="saveItem('${item.id}')">${isSaved?'SAVED ★':'SAVE'}</button><button class="iact" onclick="askAboutItem('${item.id}')">ASK AI ↗</button></div>
     </div>`;
   }).join('');
 }
+function expandCard(bodyId){ const el=document.getElementById(bodyId);if(el)el.classList.toggle('open'); }
+async function markRead(id){ try{await gasPost({action:'mark_read',id});}catch(e){} const item=intelItems.find(i=>i.id===id);if(item)item.read=true; renderIntelFeed(); }
+async function saveItem(id){ try{await gasPost({action:'save_item',id});}catch(e){} const item=intelItems.find(i=>i.id===id);if(item)item.saved=true; renderIntelFeed();toast('ITEM SAVED'); }
+function askAboutItem(id){ const item=intelItems.find(i=>i.id===id);if(!item)return; switchIntelTab('chat',document.getElementById('itab-chat')); document.getElementById('chat-input').value=`Tell me more about: ${item.title}`; document.getElementById('chat-input').focus(); }
+async function generateStory(){ if(!selKey){toast('SELECT AN EVENT IN F1 FIRST','err');return;} setSt('GENERATING STORY...'); try{const d=await gasPost({action:'generate_story',event_key:selKey});if(d.error){toast(`FAILED: ${d.error}`,'err');return;}toast('STORY GENERATED');await loadIntelFeed();switchIntelTab('feed',document.getElementById('itab-feed'));setSt('STORY READY');}catch(e){toast(`FAILED: ${e.message}`,'err');} }
+async function generateBrief(){ setSt('GENERATING BRIEF...'); try{const d=await gasPost({action:'generate_brief'});if(d.error){toast(`FAILED: ${d.error}`,'err');return;}toast('BRIEF GENERATED');await loadIntelFeed();switchIntelTab('feed',document.getElementById('itab-feed'));setSt('BRIEF READY');}catch(e){toast(`FAILED: ${e.message}`,'err');} }
+async function generateDigest(){ setSt('GENERATING DIGEST...'); try{const d=await gasPost({action:'generate_digest'});if(d.error){toast(`FAILED: ${d.error}`,'err');return;}toast('DIGEST GENERATED');await loadIntelFeed();switchIntelTab('feed',document.getElementById('itab-feed'));setSt('DIGEST READY');}catch(e){toast(`FAILED: ${e.message}`,'err');} }
 
-function expandCard(id){
-  const body=document.getElementById(`body-${id}`);
-  if(!body)return;
-  body.classList.toggle('collapsed');body.classList.toggle('expanded');
-}
-
-async function markRead(id){
-  try{await gasPost({action:'mark_read',id});}catch(e){}
-  const item=intelItems.find(i=>i.id===id);if(item)item.read=true;
-  renderIntelFeed();
-}
-
-async function saveItem(id){
-  try{await gasPost({action:'save_item',id});}catch(e){}
-  const item=intelItems.find(i=>i.id===id);if(item)item.saved=true;
-  renderIntelFeed();toast('ITEM SAVED');
-}
-
-function askAboutItem(id){
-  const item=intelItems.find(i=>i.id===id);if(!item)return;
-  switchIntelTab('chat',document.getElementById('itab-chat'));
-  document.getElementById('chat-input').value=`Tell me more about this: ${item.title}`;
-}
-
-async function generateStory(){
-  if(!selKey){toast('SELECT AN EVENT IN F1 FIRST','err');return;}
-  setSt('GENERATING STORY...');
-  try{
-    const d=await gasPost({action:'generate_story',event_key:selKey});
-    if(d.error){toast(`STORY FAILED: ${d.error}`,'err');return;}
-    toast('STORY GENERATED');await loadIntelFeed();
-    switchIntelTab('feed',document.getElementById('itab-feed'));
-    setSt('STORY READY');
-  }catch(e){toast(`FAILED: ${e.message}`,'err');}
-}
-
-async function generateBrief(){
-  setSt('GENERATING DAILY BRIEF...');
-  try{
-    const d=await gasPost({action:'generate_brief'});
-    if(d.error){toast(`BRIEF FAILED: ${d.error}`,'err');return;}
-    toast('MORNING BRIEF GENERATED');await loadIntelFeed();
-    switchIntelTab('feed',document.getElementById('itab-feed'));
-    setSt('BRIEF READY');
-  }catch(e){toast(`FAILED: ${e.message}`,'err');}
-}
-
-async function generateDigest(){
-  setSt('GENERATING WEEKLY DIGEST...');
-  try{
-    const d=await gasPost({action:'generate_digest'});
-    if(d.error){toast(`DIGEST FAILED: ${d.error}`,'err');return;}
-    toast('WEEKLY DIGEST GENERATED');await loadIntelFeed();
-    switchIntelTab('feed',document.getElementById('itab-feed'));
-    setSt('DIGEST READY');
-  }catch(e){toast(`FAILED: ${e.message}`,'err');}
-}
-
+// ── Chat with TEvo tool use ───────────────────────────────────────
 async function sendChat(){
   if(chatWaiting)return;
   const input=document.getElementById('chat-input');
-  const msg=input.value.trim();if(!msg)return;
-  input.value='';chatWaiting=true;
-  const sendBtn=document.getElementById('chat-send-btn');sendBtn.disabled=true;sendBtn.textContent='...';
-  // Add user message
+  const msg=input.value.trim(); if(!msg)return;
+  input.value=''; chatWaiting=true;
+  const sendBtn=document.getElementById('chat-send-btn'); sendBtn.disabled=true; sendBtn.textContent='...';
   appendChatMsg('user',msg);
   chatHistory.push({role:'user',content:msg});
-  // Thinking indicator
   const thinkId='think-'+Date.now();
   appendChatMsg('ai','<span class="blink">▋</span>',thinkId);
   try{
     const d=await gasPost({action:'chat',message:msg,history:chatHistory.slice(-10)});
     document.getElementById(thinkId)?.remove();
-    if(d.error){appendChatMsg('ai',`ERROR: ${d.error}`);chatHistory.pop();}
-    else{appendChatMsg('ai',d.reply);chatHistory.push({role:'assistant',content:d.reply});}
-  }catch(e){
-    document.getElementById(thinkId)?.remove();
-    appendChatMsg('ai',`FAILED: ${e.message}`);chatHistory.pop();
-  }
-  chatWaiting=false;sendBtn.disabled=false;sendBtn.textContent='SEND';
+    if(d.error){ appendChatMsg('ai',`ERROR: ${d.error}`); chatHistory.pop(); }
+    else{
+      if(d.tools_used?.length){
+        const hints=d.tools_used.map(t=>{
+          if(t.tool==='search_te_events') return`searched TEvo for "${t.input.query}"`;
+          if(t.tool==='fetch_te_listings') return`fetched listings for ${t.input.event_name}`;
+          if(t.tool==='get_tracked_events') return'pulled tracked events';
+          return t.tool;
+        });
+        appendToolHint(hints.join(' · '));
+      }
+      if(d.reply) appendChatMsg('ai',d.reply);
+      if(d.events_found?.length) appendEventCards(d.events_found,d.listings_found||[]);
+      chatHistory.push({role:'assistant',content:d.reply||''});
+    }
+  }catch(e){ document.getElementById(thinkId)?.remove(); appendChatMsg('ai',`FAILED: ${e.message}`); chatHistory.pop(); }
+  chatWaiting=false; sendBtn.disabled=false; sendBtn.textContent='SEND';
 }
 
 function appendChatMsg(role,content,id){
   const el=document.getElementById('chat-messages');
-  const div=document.createElement('div');
-  div.className=`cmsg ${role}`;
-  if(id)div.id=id;
+  const div=document.createElement('div'); div.className=`cmsg ${role}`; if(id)div.id=id;
   div.innerHTML=`<div class="cmsg-label">${role==='user'?'YOU':'S4K INTELLIGENCE'}</div><div class="cbubble">${content.replace(/\n/g,'<br>')}</div>`;
-  el.appendChild(div);
-  el.scrollTop=el.scrollHeight;
+  el.appendChild(div); el.scrollTop=el.scrollHeight; return div;
 }
 
-// showPanel override — loads feeds on panel open
-const _showPanelOrig=showPanel;
-window.showPanel=function(id,el){
-  document.querySelectorAll('.fkey').forEach(f=>f.classList.remove('active'));
-  if(el&&el.classList&&el.classList.contains('fkey'))el.classList.add('active');
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-'+id).classList.add('active');
-  if(id==='feed'||id==='feedsrc')loadRSSSrcs();
-  if(id==='intel')loadIntelFeed();
-};
+function appendToolHint(text){
+  const el=document.getElementById('chat-messages');
+  const div=document.createElement('div'); div.className='chat-tool-hint';
+  div.textContent=`⚙ ${text}`; el.appendChild(div); el.scrollTop=el.scrollHeight;
+}
 
+function appendEventCards(events,listingsFound){
+  const el=document.getElementById('chat-messages');
+  const wrap=document.createElement('div'); wrap.style.cssText='padding:0 0 8px 0;';
+  const listingsMap={};
+  (listingsFound||[]).forEach(l=>{if(l.event_id)listingsMap[String(l.event_id)]=l;});
+  const trackedIds=new Set(Object.values(tracked).map(t=>String(t.event_id)));
+  events.forEach(ev=>{
+    const card=document.createElement('div'); card.className='te-event-card';
+    const dateStr=ev.date_local||ev.date?new Date(ev.date_local||ev.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',weekday:'short'}):'TBD';
+    const isTracked=trackedIds.has(String(ev.id));
+    const lst=listingsMap[String(ev.id)];
+    card.innerHTML=`
+      <div class="te-event-name">${ev.name}</div>
+      <div class="te-event-meta"><span>${ev.venue}${ev.venue_city?', '+ev.venue_city:''}</span><span>${dateStr}</span></div>
+      ${lst?`<div class="te-event-stats"><span class="te-stat"><span>FLOOR</span><span style="color:var(--cyan);">$${lst.stats.floor}</span></span><span class="te-stat"><span>MEDIAN</span><span style="color:var(--purple);">$${lst.stats.median}</span></span><span class="te-stat"><span>AVG</span><span style="color:var(--amber);">$${lst.stats.avg}</span></span><span class="te-stat"><span>LST</span><span style="color:#A5D6A7;">${lst.stats.count}</span></span></div>`:''}
+      <div class="te-card-btns">
+        <button id="tc-${ev.id}" class="te-btn track ${isTracked?'done':''}" onclick="trackFromChat('${ev.id}','${(ev.name||'').replace(/'/g,'')}','${(ev.venue||'').replace(/'/g,'')}','${(ev.performer||'').replace(/'/g,'')}','${ev.date||''}')" ${isTracked?'disabled':''}>${isTracked?'TRACKED ✓':'TRACK'}</button>
+        ${!lst?`<button class="te-btn prices" onclick="fetchChatListings('${ev.id}','${(ev.name||'').replace(/'/g,'')}','${(ev.venue||'').replace(/'/g,'')}','${(ev.performer||'').replace(/'/g,'')}','${ev.date||''}')">GET PRICES</button>`:''}
+      </div>`;
+    wrap.appendChild(card);
+  });
+  el.appendChild(wrap); el.scrollTop=el.scrollHeight;
+}
+
+async function trackFromChat(eid,name,venue,perf,date){
+  const btn=document.getElementById(`tc-${eid}`); if(!btn||btn.disabled)return;
+  btn.textContent='FETCHING...'; btn.style.opacity='0.5';
+  try{
+    const d=await gasGet({action:'fetch_te',event_id:eid,name:encodeURIComponent(name),venue:encodeURIComponent(venue),performer:encodeURIComponent(perf),date});
+    if(d.error){btn.textContent='ERROR';btn.style.color='var(--red)';btn.style.borderColor='var(--red)';btn.style.opacity='1';return;}
+    await saveSnap('TE',venue,perf,eid,name,date,d.stats);
+    btn.textContent='TRACKED ✓'; btn.classList.add('done'); btn.disabled=true; btn.style.opacity='1';
+    toast(`TRACKED: ${name}`); appendToolHint(`${name} tracked · switch to F1 to see chart`);
+  }catch(e){btn.textContent='FAILED';btn.style.color='var(--red)';btn.style.opacity='1';}
+}
+
+async function fetchChatListings(eid,name,venue,perf,date){
+  appendToolHint(`fetching listings for ${name}...`);
+  try{
+    const d=await gasGet({action:'fetch_te',event_id:eid,name:encodeURIComponent(name),venue:encodeURIComponent(venue),performer:encodeURIComponent(perf),date});
+    if(d.error){appendChatMsg('ai',`Could not fetch listings: ${d.error}`);return;}
+    const s=d.stats;
+    appendChatMsg('ai',`${name}\nFloor: $${s.floor} · Median: $${s.median} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listings`);
+  }catch(e){appendChatMsg('ai',`Failed to fetch: ${e.message}`);}
+}
+
+// ================================================================
+// INIT
+// ================================================================
 async function init(){
   loadCreds();
   loadTheme();
   const c=getCreds();
   if(c.gas){
     await loadTracked();
-    const keys=Object.keys(tracked);
-    if(keys.length)selectEvent(keys[0]);
+    loadIntelFeed(); // F6 is default — load it on startup
   } else {
     setSt('ADD GAS URL IN F8 TO CONNECT');
   }

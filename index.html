@@ -270,7 +270,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 <div class="terminal">
 
 <div class="topbar">
-  <span id="term-title" style="font-size:13px;font-weight:600;letter-spacing:0.1em;">S4K TERMINAL <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.2.6</span></span>
+  <span id="term-title" style="font-size:13px;font-weight:600;letter-spacing:0.1em;">S4K TERMINAL <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.5</span></span>
   <div style="display:flex;gap:16px;"><span id="clock"></span><span>NYC</span></div>
 </div>
 
@@ -278,11 +278,12 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   <div class="fkey" onclick="showPanel('detail',this)"><span>F1</span>TRACKED</div>
   <div class="fkey" style="opacity:0.3;cursor:default;pointer-events:none;"><span>F2</span>SEATGEEK</div>
   <div class="fkey" onclick="showPanel('addtevo',this)"><span>F3</span>ADD TEVO</div>
-  <div class="fkey" onclick="showPanel('feed',this)"><span>F4</span>FEED</div>
+  <div class="fkey" onclick="showPanel('feed',this);clearBadge('feed-badge')" id="fkey-feed"><span>F4</span>FEED <span id="feed-badge" style="display:none;background:var(--rss);color:#000;font-size:8px;padding:0 4px;border-radius:8px;margin-left:2px;"></span></div>
   <div class="fkey" onclick="showPanel('theme',this)"><span>F5</span>THEME</div>
-  <div class="fkey active" onclick="showPanel('intel',this)"><span>F6</span>INTELLIGENCE</div>
+  <div class="fkey active" onclick="showPanel('intel',this);clearBadge('intel-badge')" id="fkey-intel"><span>F6</span>INTELLIGENCE <span id="intel-badge" style="display:none;background:var(--purple);color:#000;font-size:8px;padding:0 4px;border-radius:8px;margin-left:2px;"></span></div>
   <div class="fkey" onclick="showPanel('creds',this)"><span>F8</span>SETTINGS</div>
-  <div class="fkey" onclick="refreshAll(this)" style="margin-left:auto;"><span>F9</span>REFRESH ALL</div>
+  <div class="fkey" onclick="showPanel('usersettings',this)"><span>F9</span>USER SETTINGS</div>
+  <div class="fkey" onclick="refreshAll(this)" style="margin-left:auto;padding:2px 10px;border:1px solid var(--border);border-radius:2px;" title="Refresh all tracked events">↺ REFRESH</div>
 </div>
 
 <div class="source-bar">
@@ -352,6 +353,8 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
         <div style="flex:1;"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="cht" style="color:var(--rss);">LIVE FEED</span><span id="feed-badge" style="font-size:10px;padding:2px 8px;border:1px solid var(--rss);color:var(--rss);">0 ITEMS</span><span id="feed-updated" style="font-size:10px;color:var(--muted);"></span></div><div class="chm">Filters at source via rss.app league tags</div></div>
         <div class="chact"><button class="tmbtn rpri" onclick="loadFeed()" id="btn-feed-ref">REFRESH</button><button class="tmbtn apri" onclick="scoreLiveFeed()" id="btn-score">SCORE WITH AI</button><button class="tmbtn" onclick="showPanel('feedsrc',null)" style="font-size:9px;">MANAGE SOURCES</button></div>
       </div>
+      <!-- Portfolio snapshot strip -->
+      <div id="f4-portfolio" style="padding:8px 12px;border-bottom:1px solid var(--border);background:var(--bg2);font-size:10px;"></div>
       <div class="feed-bar">
         <div class="fpill active" onclick="setLF('all',this)">ALL</div>
         <div class="fpill" onclick="setLF('NBA',this)">NBA</div>
@@ -359,6 +362,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
         <div class="fpill" onclick="setLF('NHL',this)">NHL</div>
         <div class="fpill" onclick="setLF('MLB',this)">MLB</div>
         <div class="fpill" onclick="setLF('General',this)">GENERAL</div>
+        <div class="fpill" onclick="setLF('matched',this)" style="color:var(--rss);border-color:var(--rss);">MATCHED ●</div>
         <input class="fsearch" id="feed-kw" placeholder="keyword or team..." oninput="renderFeed()" />
         <div style="display:flex;gap:4px;margin-left:auto;"><div class="fpill" id="f-high" onclick="setIF('High',this)">HIGH</div><div class="fpill" id="f-med" onclick="setIF('Medium',this)">MED</div></div>
       </div>
@@ -440,7 +444,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
         <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></div>TERMINAL NAME</div>
         <div class="ifield" style="max-width:300px;"><div class="ilbl">DISPLAY NAME</div><input class="tminput" id="term-name" placeholder="S4K TERMINAL" oninput="applyTermName(this.value)"/></div>
         <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></div>MARQUEE <span style="font-size:9px;color:var(--muted);margin-left:6px;">PEAK INTERNET</span></div>
-        <div class="ifield" style="max-width:420px;"><div class="ilbl">SCROLLING MESSAGE (blank to disable)</div><input class="tminput" id="marquee-text" placeholder="S4K TERMINAL · TICKET MARKET ANALYTICS v5.2.6 · " oninput="applyMarquee(this.value)"/></div>
+        <div class="ifield" style="max-width:420px;"><div class="ilbl">SCROLLING MESSAGE (blank to disable)</div><input class="tminput" id="marquee-text" placeholder="S4K TERMINAL · TICKET MARKET ANALYTICS v5.5 · " oninput="applyMarquee(this.value)"/></div>
         <div id="marquee-preview" style="display:none;overflow:hidden;border:1px solid var(--border);padding:4px 0;margin-top:8px;background:var(--bg2);"><div id="marquee-inner" style="white-space:nowrap;font-size:10px;color:var(--amber);animation:marquee 12s linear infinite;display:inline-block;padding-left:100%;"></div></div>
       </div>
     </div>
@@ -525,6 +529,59 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
       </div>
     </div>
 
+    <!-- F9 USER SETTINGS -->
+    <div class="panel" id="panel-usersettings" style="display:none;overflow-y:auto;">
+      <div class="panel-inner" style="padding:16px 20px;max-width:700px;">
+        <div class="sectitle">USER SETTINGS</div>
+
+        <!-- Last refresh status -->
+        <div style="display:flex;gap:20px;margin:12px 0 20px;padding:10px 14px;border:1px solid var(--border);background:var(--bg2);flex-wrap:wrap;">
+          <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px;">LAST AUTO-REFRESH</div><div id="us-last-refresh" style="font-size:12px;color:var(--white);">—</div></div>
+          <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px;">REFRESH INTERVAL</div><div style="font-size:12px;color:var(--cyan);">Every 60 min</div></div>
+          <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px;">TOTAL REFRESHES</div><div id="us-refresh-count" style="font-size:12px;color:var(--white);">—</div></div>
+          <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px;">TRACKED EVENTS</div><div id="us-tracked-count" style="font-size:12px;color:var(--green);">—</div></div>
+          <div style="margin-left:auto;align-self:center;"><button class="tmbtn" onclick="loadUserSettings()">REFRESH STATUS</button></div>
+        </div>
+
+        <!-- Tracked Keywords -->
+        <div class="sectitle">TRACKED KEYWORDS
+          <span style="font-size:9px;color:var(--muted);font-weight:400;margin-left:8px;">When a feed item matches, it appears in F4 and generates an F6 alert</span>
+        </div>
+        <div style="display:flex;gap:8px;margin:8px 0;">
+          <input class="tminput" id="kw-input" placeholder="e.g. LeBron, NBA trade, injury report..." style="flex:1;font-size:11px;" onkeydown="if(event.key==='Enter')addKeyword()"/>
+          <select class="tminput" id="kw-league" style="width:120px;font-size:11px;">
+            <option value="all">All Leagues</option>
+            <option value="NBA">NBA</option>
+            <option value="NFL">NFL</option>
+            <option value="NHL">NHL</option>
+            <option value="MLB">MLB</option>
+            <option value="MLS">MLS</option>
+            <option value="Concert">Concert</option>
+          </select>
+          <button class="tmbtn" onclick="addKeyword()" style="color:var(--green);border-color:var(--green);">+ ADD</button>
+        </div>
+        <div id="kw-list" style="min-height:60px;border:1px solid var(--border);padding:8px;background:var(--bg);margin-bottom:16px;">
+          <div style="color:var(--muted);font-size:10px;">Loading keywords...</div>
+        </div>
+
+        <!-- Auto-tracked teams from portfolio -->
+        <div class="sectitle">AUTO-TRACKED FROM PORTFOLIO
+          <span style="font-size:9px;color:var(--muted);font-weight:400;margin-left:8px;">Feed automatically watches for these based on your tracked events</span>
+        </div>
+        <div id="auto-tracked-terms" style="padding:8px;border:1px solid var(--border);background:var(--bg);color:var(--muted);font-size:10px;line-height:2;">
+          Loading...
+        </div>
+
+        <!-- Trigger setup note -->
+        <div class="sectitle" style="margin-top:20px;">GAS TRIGGER SETUP</div>
+        <div style="font-size:10px;color:var(--muted);line-height:1.9;padding:10px 14px;border:1px solid var(--border);background:var(--bg2);">
+          To enable hourly auto-refresh, run <span style="color:var(--white);">setupTriggers()</span> once in the GAS editor.<br>
+          GAS editor → Run → Run function → <span style="color:var(--cyan);">setupTriggers</span><br>
+          This creates a time-based trigger that fires <span style="color:var(--green);">every hour</span>, refreshes all tracked events, and writes a KPI brief to F6.
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -567,9 +624,10 @@ function showPanel(id,el){
   if(el&&el.classList&&el.classList.contains('fkey')) el.classList.add('active');
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('panel-'+id).classList.add('active');
-  if(id==='feed'){ loadFeed(); startFeedPoll(); } else { stopFeedPoll(); }
+  if(id==='feed'){ loadFeed(); startFeedPoll(); renderF4Portfolio(); } else { stopFeedPoll(); }
   if(id==='feedsrc'){ loadRSSFeeds(); const u=document.getElementById('gas-url-display'); if(u) u.textContent=getCreds().gas||'(save GAS URL in F8 first)'; }
   if(id==='intel') loadIntelFeed();
+  if(id==='usersettings') loadUserSettings();
 }
 
 // ================================================================
@@ -787,12 +845,23 @@ async function loadFeed(){
   const btn=document.getElementById('btn-feed-ref'); btn.disabled=true; btn.textContent='FETCHING...'; setSt('FETCHING LIVE FEED...');
   try{
     const params={action:'get_rss_live',limit:150};
-    if(lfilt&&lfilt!=='all') params.league=lfilt;
+    if(lfilt&&lfilt!=='all'&&lfilt!=='matched') params.league=lfilt;
     const d=await gasGet(params);
-    feedItems=(d.items||[]).map(i=>({title:i.item_title||'',link:i.item_url||'',desc:i.item_description||'',pubDate:i.item_published||i.received_ts||'',source:i.feed_title||'',league:i.feed_league||'General',impact:i.impact||null,category:i.category||null,reason:i.reason||null}));
-    document.getElementById('feed-badge').textContent=`${feedItems.length} ITEMS`;
+    const prevCount=feedItems.length;
+    feedItems=(d.items||[]).map(i=>({
+      title:i.item_title||'', link:i.item_url||'', desc:i.item_description||'',
+      pubDate:i.item_published||i.received_ts||'', source:i.feed_title||'',
+      league:i.feed_league||'General', impact:i.impact||null,
+      category:i.category||null, reason:i.reason||null,
+      priority:i.reason||i.category||null  // 'matched' flag from webhook
+    }));
+    const newCount=feedItems.length;
+    const matched=feedItems.filter(i=>i.priority==='matched'||i.category==='matched').length;
+    document.getElementById('feed-badge').textContent=`${newCount} ITEMS${matched?` · ${matched} MATCHED`:''}`;
     document.getElementById('feed-updated').textContent=`updated ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`;
-    feedItems.length?renderFeed():document.getElementById('feed-list').innerHTML=`<div class="empty"><span style="font-size:16px;color:var(--border);">▬▬▬</span><span>NO ITEMS YET<span class="blink">_</span></span><span style="font-size:10px;">CREATE FEEDS IN MANAGE SOURCES · ITEMS ARRIVE VIA WEBHOOK</span></div>`;
+    // Bump nav badge if new items arrived while panel was hidden
+    if(newCount>prevCount) bumpBadge('feed-badge',newCount-prevCount);
+    newCount?renderFeed():document.getElementById('feed-list').innerHTML=`<div class="empty"><span style="font-size:16px;color:var(--border);">▬▬▬</span><span>NO ITEMS YET<span class="blink">_</span></span><span style="font-size:10px;">CREATE FEEDS IN MANAGE SOURCES · ITEMS ARRIVE VIA WEBHOOK</span></div>`;
     setSt('FEED READY');
   }catch(e){toast(`FEED FAILED: ${e.message}`,'err');setSt('FEED ERROR');}
   btn.disabled=false; btn.textContent='REFRESH';
@@ -808,17 +877,28 @@ function setIF(i,el){ ifilt=ifilt===i?null:i; document.querySelectorAll('#f-high
 function renderFeed(){
   const kw=(document.getElementById('feed-kw').value||'').toLowerCase();
   let items=[...feedItems];
+  if(lfilt&&lfilt!=='all'){
+    if(lfilt==='matched') items=items.filter(i=>i.category==='matched'||i.reason==='matched'||i.priority==='matched');
+    else items=items.filter(i=>i.league===lfilt);
+  }
   if(ifilt) items=items.filter(i=>i.impact===ifilt);
-  if(kw) items=items.filter(i=>i.title.toLowerCase().includes(kw)||i.source.toLowerCase().includes(kw)||(i.desc||'').toLowerCase().includes(kw));
+  if(kw) items=items.filter(i=>(i.title||'').toLowerCase().includes(kw)||(i.source||'').toLowerCase().includes(kw)||(i.desc||'').toLowerCase().includes(kw));
   const el=document.getElementById('feed-list');
   if(!items.length){el.innerHTML=`<div class="empty" style="height:200px;"><span style="color:var(--muted);font-size:11px;">NO ITEMS MATCH FILTER</span></div>`;return;}
-  el.innerHTML=items.map(item=>`<div class="fi" onclick="${item.link?`window.open('${item.link.replace(/'/g,'')}','_blank')`:''}">
-    <div class="fi-top"><div class="fi-title">${item.title}</div>${item.impact?`<span class="fi-imp ${item.impact}">${item.impact.toUpperCase()}</span>`:''}</div>
-    <div class="fi-meta"><span class="fi-src">${item.source}</span><span class="fi-tag">${item.league}</span>${item.category?`<span class="fi-tag" style="color:var(--purple);border-color:var(--purple);">${item.category}</span>`:''}<span class="fi-time">${ago(item.pubDate)}</span></div>
-    ${item.desc?`<div class="fi-desc">${item.desc.substring(0,120)}${item.desc.length>120?'...':''}</div>`:''}
-    ${item.reason?`<div class="fi-reason">${item.reason}</div>`:''}
-    <div style="margin-top:6px;"><button onclick="event.stopPropagation();feedToChat('${(item.title||'').replace(/'/g,'').replace(/"/g,'').substring(0,80)}','${item.source||''}')" style="font-size:9px;padding:2px 8px;border:1px solid var(--purple);color:var(--purple);background:transparent;cursor:pointer;font-family:var(--font);">ASK AI ↗</button></div>
-  </div>`).join('');
+  el.innerHTML=items.map(item=>{
+    const isMatched=item.category==='matched'||item.reason==='matched'||item.priority==='matched';
+    return`<div class="fi" style="${isMatched?'border-left:3px solid var(--rss);':''}" onclick="${item.link?`window.open('${item.link.replace(/'/g,'')}','_blank')`:''}">
+      <div class="fi-top">
+        <div class="fi-title">${item.title}</div>
+        ${item.impact?`<span class="fi-imp ${item.impact}">${item.impact.toUpperCase()}</span>`:''}
+        ${isMatched?`<span style="font-size:9px;padding:1px 5px;border:1px solid var(--rss);color:var(--rss);margin-left:4px;">MATCHED</span>`:''}
+      </div>
+      <div class="fi-meta"><span class="fi-src">${item.source}</span><span class="fi-tag">${item.league}</span>${item.category&&item.category!=='matched'?`<span class="fi-tag" style="color:var(--purple);border-color:var(--purple);">${item.category}</span>`:''}<span class="fi-time">${ago(item.pubDate)}</span></div>
+      ${item.desc?`<div class="fi-desc">${item.desc.substring(0,120)}${item.desc.length>120?'...':''}</div>`:''}
+      ${item.reason&&item.reason!=='matched'?`<div class="fi-reason">${item.reason}</div>`:''}
+      <div style="margin-top:6px;"><button onclick="event.stopPropagation();feedToChat('${(item.title||'').replace(/'/g,'').replace(/"/g,'').substring(0,80)}','${item.source||''}')" style="font-size:9px;padding:2px 8px;border:1px solid var(--purple);color:var(--purple);background:transparent;cursor:pointer;font-family:var(--font);">ASK AI ↗</button></div>
+    </div>`;
+  }).join('');
 }
 function feedToChat(title, source){
   // Switch to F6 intelligence tab
@@ -881,7 +961,7 @@ function applyCustomColor(v,val){ currentTheme.custom[v]=val; document.documentE
 function syncColorPickers(){ const s=getComputedStyle(document.documentElement); const m={'--bg':'c-bg','--bg2':'c-bg2','--amber':'c-amber','--white':'c-white','--sg':'c-sg','--te':'c-te','--border':'c-border','--muted':'c-muted'}; Object.entries(m).forEach(([v,id])=>{const el=document.getElementById(id);if(!el)return;const val=s.getPropertyValue(v).trim();if(val.startsWith('#')&&val.length>=7)el.value=val.substring(0,7);}); }
 function applyBG(name,el){ currentTheme.bg=name; document.querySelectorAll('.bg-card').forEach(c=>c.classList.remove('active')); if(el)el.classList.add('active'); const p=BG_MAPS[name]||BG_MAPS.none,t=document.querySelector('.terminal'); t.style.backgroundImage=p.bg; t.style.backgroundSize=p.size; }
 function applyCursor(name,el){ currentTheme.cursor=name; document.querySelectorAll('.cur-card').forEach(c=>c.classList.remove('active')); if(el)el.classList.add('active'); document.body.style.cursor=name==='none'?'none':name; }
-function applyTermName(val){ currentTheme.name=val; const d=val.trim()||'S4K TERMINAL'; document.getElementById('term-title').innerHTML=`${d.toUpperCase()} <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.2.6</span>`; document.title=val.trim()||'S4K Terminal'; }
+function applyTermName(val){ currentTheme.name=val; const d=val.trim()||'S4K TERMINAL'; document.getElementById('term-title').innerHTML=`${d.toUpperCase()} <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.5</span>`; document.title=val.trim()||'S4K Terminal'; }
 function applyMarquee(val){ currentTheme.marquee=val; const p=document.getElementById('marquee-preview'),inn=document.getElementById('marquee-inner'); if(!val.trim()){p.style.display='none';removeMarqueeBar();return;} p.style.display='block';inn.textContent=val;applyMarqueeBar(val); }
 function applyMarqueeBar(text){ removeMarqueeBar();if(!text)return; const bar=document.createElement('div');bar.id='marquee-bar';bar.style.cssText='overflow:hidden;border-bottom:1px solid var(--border);padding:3px 0;background:var(--bg2);flex-shrink:0;';bar.innerHTML=`<div style="white-space:nowrap;font-size:10px;color:var(--amber);animation:marquee 14s linear infinite;display:inline-block;padding-left:100%;letter-spacing:0.1em;">${text}</div>`;document.querySelector('.statusbar').insertAdjacentElement('afterend',bar); }
 function removeMarqueeBar(){ const el=document.getElementById('marquee-bar');if(el)el.remove(); }
@@ -896,9 +976,13 @@ function switchIntelTab(tab,el){ document.querySelectorAll('.itab').forEach(t=>t
 async function loadIntelFeed(){
   setSt('LOADING INTELLIGENCE FEED...');
   try{
-    const d=await gasGet({action:'get_feed',limit:100}); intelItems=d.items||[];
+    const d=await gasGet({action:'get_feed',limit:100});
+    const prevUnread=intelItems.filter(i=>!i.read||i.read==='false'||i.read===false).length;
+    intelItems=d.items||[];
     const unread=intelItems.filter(i=>!i.read||i.read==='false'||i.read===false).length;
     const badge=document.getElementById('unread-badge'); if(unread>0){badge.textContent=unread;badge.style.display='inline-block';}else badge.style.display='none';
+    // Bump nav badge if new unread items arrived
+    if(unread>prevUnread) bumpBadge('intel-badge',unread-prevUnread);
     renderIntelFeed(); setSt('INTELLIGENCE READY');
   }catch(e){setSt('INTELLIGENCE FEED ERROR');}
 }
@@ -1021,7 +1105,8 @@ function appendEventCards(events, listingsFound){
       .map(s=>s.replace(/[^\w\s]/g,'').trim())
       .filter(s=>s.length>=3);
     const feedMatches=allFeedItems.filter(item=>{
-      // Search title, description, and source name — catches "Lakers / Twitter" style feeds
+      const t=(item.title||item.item_title||'').trim();
+      if(t.length<=5||/^pic\.?$|^image$|^photo$/i.test(t)) return false;
       const text=[
         item.title||item.item_title||'',
         item.desc||item.item_description||'',
@@ -1205,11 +1290,12 @@ async function fetchChatListings(eid){
 
     if(d.ok && d.stats && d.stats.count > 0){
       const s=d.stats, w=d.wholesale_stats||{};
-      const src=d.source==='stats'?'aggregate stats':'live listings';
       const parking=d.parking_listings||0;
       let msg=`${ev.name}\n`;
       msg+=`**Retail** — Floor: $${s.floor} · Median: $${s.median} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listings`;
-      if(w.floor&&w.count>0) msg+=`\n**Wholesale** — Floor: $${w.floor} · Avg: $${w.avg} · Max: $${w.max}`;
+      // Only show wholesale if it differs from retail (stats fallback often returns identical values)
+      if(w.floor&&w.count>0&&(w.floor!==s.floor||w.avg!==s.avg))
+        msg+=`\n**Wholesale** — Floor: $${w.floor} · Avg: $${w.avg} · Max: $${w.max}`;
       if(d.delivery?.in_hand_count>0||d.delivery?.instant_delivery_count>0)
         msg+=`\n${d.delivery.in_hand_count} in-hand · ${d.delivery.instant_delivery_count||0} instant delivery`;
       if(parking>0) msg+=`\n${parking} parking listings excluded`;
@@ -1290,13 +1376,176 @@ async function clearDebugSheet(){
   try{ await gasPost({action:'clear_debug'}); document.getElementById('debug-log').textContent='Cleared.'; }
   catch(e){ toast(`FAILED: ${e.message}`,'err'); }
 }
+
+// ================================================================
+// BADGE SYSTEM
+// ================================================================
+const badgeCounts={feed:0,intel:0};
+function updateBadge(id,count){
+  const el=document.getElementById(id);
+  if(!el)return;
+  if(count>0){el.textContent=count>99?'99+':count;el.style.display='inline';}
+  else{el.style.display='none';}
+}
+function clearBadge(id){
+  const key=id.replace('-badge','');
+  badgeCounts[key]=0; updateBadge(id,0);
+}
+function bumpBadge(id,n=1){
+  const key=id.replace('-badge','');
+  const panelMap={'feed-badge':'panel-feed','intel-badge':'panel-intel'};
+  const panel=document.getElementById(panelMap[id]);
+  if(panel&&panel.style.display!=='none')return;
+  badgeCounts[key]=(badgeCounts[key]||0)+n;
+  updateBadge(id,badgeCounts[key]);
+}
+
+// ================================================================
+// USER SETTINGS PANEL (F9)
+// ================================================================
+async function loadUserSettings(){
+  try{
+    const [sd,kd]=await Promise.all([gasGet({action:'get_settings'}),gasGet({action:'get_keywords'})]);
+    if(sd.ok){
+      document.getElementById('us-last-refresh').textContent=sd.last_auto_refresh
+        ?new Date(sd.last_auto_refresh).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})
+        :'Never (run setupTriggers() in GAS)';
+      document.getElementById('us-refresh-count').textContent=sd.auto_refresh_count||'0';
+      document.getElementById('us-tracked-count').textContent=sd.tracked_count||Object.keys(tracked).length;
+    }
+    renderKeywords(kd.keywords||[]);
+    renderAutoTrackedTerms();
+  }catch(e){toast(`Settings load failed: ${e.message}`,'err');}
+}
+
+function renderKeywords(keywords){
+  const el=document.getElementById('kw-list');
+  if(!keywords.length){el.innerHTML='<div style="color:var(--muted);font-size:10px;">No keywords yet — add one above.</div>';return;}
+  el.innerHTML=keywords.map(kw=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);">
+      <span style="color:var(--white);font-size:11px;flex:1;">${kw.keyword}</span>
+      <span style="font-size:9px;padding:1px 6px;border:1px solid var(--border);color:var(--muted);">${kw.league||'all'}</span>
+      <span style="font-size:9px;color:var(--muted);">${kw.match_count||0} matches</span>
+      ${kw.last_matched?`<span style="font-size:9px;color:var(--muted);">${ago(kw.last_matched)}</span>`:''}
+      <button onclick="removeKeyword('${kw.id}')" style="font-size:9px;padding:1px 6px;border:1px solid var(--red);color:var(--red);background:transparent;cursor:pointer;font-family:var(--font);">✕</button>
+    </div>`).join('');
+}
+
+function renderAutoTrackedTerms(){
+  const el=document.getElementById('auto-tracked-terms');
+  if(!el)return;
+  const terms=new Set();
+  Object.values(tracked).forEach(ev=>{
+    const name=(ev.name||ev.event_name||'').toLowerCase();
+    name.split(/\s+(?:at|vs\.?|@)\s+/).forEach(t=>{
+      t.split(/\s+/).filter(w=>w.length>3).forEach(w=>terms.add(w));
+    });
+    if(ev.performer&&ev.performer.length>3)terms.add(ev.performer.toLowerCase());
+  });
+  if(!terms.size){el.textContent='No tracked events yet.';return;}
+  el.innerHTML=[...terms].map(t=>`<span style="display:inline-block;margin:2px;padding:1px 8px;border:1px solid var(--border);color:var(--cyan);font-size:10px;">${t}</span>`).join('');
+}
+
+async function addKeyword(){
+  const kw=document.getElementById('kw-input').value.trim();
+  const league=document.getElementById('kw-league').value;
+  if(!kw)return;
+  try{
+    const d=await gasPost({action:'add_keyword',keyword:kw,league});
+    if(d.duplicate){toast('Keyword already tracked','err');return;}
+    document.getElementById('kw-input').value='';
+    toast(`TRACKING: "${kw}"`);
+    loadUserSettings();
+  }catch(e){toast(`Failed: ${e.message}`,'err');}
+}
+
+async function removeKeyword(id){
+  try{
+    await gasPost({action:'remove_keyword',id});
+    loadUserSettings();
+    toast('KEYWORD REMOVED');
+  }catch(e){toast(`Failed: ${e.message}`,'err');}
+}
+
+// ================================================================
+// F4 PORTFOLIO SNAPSHOT SECTION
+// ================================================================
+function renderF4Portfolio(){
+  const el=document.getElementById('f4-portfolio');
+  if(!el)return;
+  const evs=Object.values(tracked);
+  if(!evs.length){el.innerHTML='<div style="color:var(--muted);font-size:10px;padding:8px 0;">No tracked events yet.</div>';return;}
+  el.innerHTML=`<div style="font-size:9px;color:var(--cyan);letter-spacing:.1em;margin-bottom:6px;">PORTFOLIO — ${evs.length} TRACKED</div>`+
+    evs.map(ev=>{
+      const hist=(ev.history||[]).filter(s=>s.floor>0&&s.avg>0);
+      const lat=hist.length?hist[hist.length-1]:null;
+      const prev=hist.length>1?hist[hist.length-2]:null;
+      const fd=lat&&prev?lat.floor-prev.floor:null;
+      const cd=lat&&prev?lat.count-prev.count:null;
+      const dateStr=ev.date?new Date(ev.date).toLocaleDateString('en-US',{month:'short',day:'numeric'}):''
+      return `<div style="padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <div style="flex:1;min-width:120px;">
+          <div style="font-size:10px;color:var(--white);line-height:1.3;">${(ev.name||ev.event_name||'').substring(0,40)}</div>
+          <div style="font-size:9px;color:var(--muted);">${dateStr}</div>
+        </div>
+        ${lat?`
+          <span style="font-size:10px;"><span style="color:var(--muted);">FL </span><span style="color:var(--cyan);">$${lat.floor}</span>${fd!==null?`<span style="color:${fd>0?'var(--red)':'var(--green)'};">${fd>0?'▲':'▼'}${Math.abs(fd)}</span>`:''}</span>
+          <span style="font-size:10px;"><span style="color:var(--muted);">AVG </span><span style="color:var(--amber);">$${lat.avg}</span></span>
+          <span style="font-size:10px;"><span style="color:var(--muted);">LST </span><span style="color:#A5D6A7;">${(lat.count||0)}</span>${cd!==null?`<span style="color:${cd<0?'var(--red)':'var(--green)'};">${cd>0?'+':''}${cd}</span>`:''}</span>
+        `:`<span style="font-size:9px;color:var(--muted);">no data</span>`}
+      </div>`;
+    }).join('');
+}
+
+// ================================================================
+// 5-MINUTE SNAPSHOT POLL — silently detects hourly auto-refresh
+// ================================================================
+let snapshotPollTimer=null, lastSnapshotTs=null;
+
+function startSnapshotPoll(){
+  stopSnapshotPoll();
+  snapshotPollTimer=setInterval(checkForNewSnapshots,5*60*1000);
+}
+function stopSnapshotPoll(){if(snapshotPollTimer){clearInterval(snapshotPollTimer);snapshotPollTimer=null;}}
+
+async function checkForNewSnapshots(){
+  try{
+    const d=await gasGet({action:'get_settings'});
+    if(!d.ok||!d.last_auto_refresh)return;
+    if(d.last_auto_refresh===lastSnapshotTs)return;
+    // New auto-refresh detected
+    lastSnapshotTs=d.last_auto_refresh;
+    await loadTracked();
+    renderSidebar();
+    renderF4Portfolio();
+    // Reload intel feed to pick up new brief card
+    const intelPanel=document.getElementById('panel-intel');
+    if(intelPanel&&intelPanel.style.display!=='none') loadIntelFeed();
+    // Reload rss feed
+    const feedPanel=document.getElementById('panel-feed');
+    if(feedPanel&&feedPanel.style.display!=='none') loadFeed();
+    // Badge panels that aren't visible
+    bumpBadge('intel-badge',1);
+    bumpBadge('feed-badge',1);
+    toast('↺ Portfolio auto-refreshed');
+    setSt(`LAST REFRESH: ${new Date(d.last_auto_refresh).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`);
+  }catch(e){}
+}
+
+// ================================================================
+// INIT
+// ================================================================
 async function init(){
   loadCreds();
   loadTheme();
   const c=getCreds();
   if(c.gas){
     await loadTracked();
-    loadIntelFeed(); // F6 is default — load it on startup
+    loadIntelFeed();
+    startSnapshotPoll();
+    gasGet({action:'get_settings'}).then(d=>{
+      if(d.ok&&d.last_auto_refresh) lastSnapshotTs=d.last_auto_refresh;
+    }).catch(()=>{});
   } else {
     setSt('ADD GAS URL IN F8 TO CONNECT');
   }

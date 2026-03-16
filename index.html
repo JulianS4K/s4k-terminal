@@ -1177,14 +1177,16 @@ async function fetchChatListings(eid){
     const d = await gasGet(params);
 
     if(d.ok && d.stats && d.stats.count > 0){
-      const s=d.stats, w=d.wholesale_stats||{}, own=d.owned||{};
+      const s=d.stats, w=d.wholesale_stats||{};
       const src=d.source==='stats'?'aggregate stats':'live listings';
+      const parking=d.parking_listings||0;
       let msg=`${ev.name}\n`;
-      msg+=`Floor: $${s.floor} · Median: $${s.median} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listings`;
-      if(w.floor&&w.floor!==s.floor) msg+=`\nWholesale floor: $${w.floor} · avg: $${w.avg}`;
-      if(own.count>0) msg+=`\nYour office: ${own.count} listing${own.count!==1?'s':''}${own.stats?` · floor $${own.stats.floor}`:''}`;
-      if(d.delivery?.in_hand_count>0) msg+=`\n${d.delivery.in_hand_count} in-hand · ${d.delivery.instant_delivery_count||0} instant delivery`;
-      if(d.source==='stats') msg+=`\n(aggregate data — no active resale listings)`;
+      msg+=`**Retail** — Floor: $${s.floor} · Median: $${s.median} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listings`;
+      if(w.floor&&w.count>0) msg+=`\n**Wholesale** — Floor: $${w.floor} · Avg: $${w.avg} · Max: $${w.max}`;
+      if(d.delivery?.in_hand_count>0||d.delivery?.instant_delivery_count>0)
+        msg+=`\n${d.delivery.in_hand_count} in-hand · ${d.delivery.instant_delivery_count||0} instant delivery`;
+      if(parking>0) msg+=`\n${parking} parking listings excluded`;
+      if(d.source==='stats') msg+=`\n_(aggregate stats — live listings not available)_`;
       appendChatMsg('ai', msg);
       if(btn){ btn.textContent='PRICES SHOWN'; btn.style.opacity='0.4'; }
 

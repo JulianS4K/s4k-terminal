@@ -982,40 +982,75 @@ function appendEventCards(events,listingsFound){
   el.appendChild(wrap); el.scrollTop=el.scrollHeight;
 }
 
-// Track without requiring listings — registers event for monitoring immediately
+// Track without requiring listings — registers event, fetches wiki + weather enrichment
 async function trackFromChat(eid){
   const ev = chatEventStore[eid];
   if(!ev) return;
   const btn=document.getElementById(`tc-${eid}`); if(!btn||btn.disabled)return;
-
   btn.textContent='TRACKING...'; btn.style.opacity='0.5';
   try{
-    // Register the event for tracking — no snapshot needed yet
-    // saveSnap with zero stats works; next refresh will populate real prices
-    const key = skey('TE', ev.venue||'', ev.performer||'');
+    // Build stable IDs for venue and performer
+    const venueId     = ev.venue     ? 'v_'+ev.venue.replace(/[^\w]/g,'_').substring(0,30).toLowerCase()     : '';
+    const performerId = ev.performer ? 'p_'+ev.performer.replace(/[^\w]/g,'_').substring(0,30).toLowerCase() : '';
+
     const evRecord = {
-      key, src:'TE', event_id:String(ev.id),
-      name:ev.name||'', venue:ev.venue||'', performer:ev.performer||'',
-      date:ev.date||ev.date_local||'', added_at:new Date().toISOString(), history:[]
+      key:          skey('TE', ev.venue||'', ev.performer||''),
+      src:          'TE',
+      event_id:     String(ev.id),
+      name:         ev.name||'',
+      venue_id:     venueId,
+      venue:        ev.venue||'',
+      venue_city:   ev.venue_city||'',
+      performer_id: performerId,
+      performer:    ev.performer||'',
+      date:         ev.date||ev.date_local||'',
+      added_at:     new Date().toISOString(),
+      history:      []
     };
 
-    // Write to Sheets — track record only, no snapshot required
+    // Write to Sheets
     await gasPost({action:'track', event:evRecord});
-    tracked[key] = evRecord;
+    tracked[evRecord.key] = evRecord;
     renderSidebar(); updateTotal();
 
     btn.textContent='TRACKED ✓'; btn.classList.add('done'); btn.disabled=true; btn.style.opacity='1';
     toast(`TRACKING: ${ev.name}`);
-    appendToolHint(`${ev.name} added to watchlist · refresh in F1 to pull prices`);
+    appendToolHint(`${ev.name} added · enriching with stats, Wikipedia + weather...`);
 
-    // Now try to get a snapshot in background — don't block on failure
-    gasGet({action:'fetch_te',event_id:String(ev.id),name:encodeURIComponent(ev.name||''),venue:encodeURIComponent(ev.venue||''),performer:encodeURIComponent(ev.performer||''),date:ev.date||ev.date_local||''})
+    // Background: fetch stats snapshot
+    gasGet({action:'fetch_te_stats', event_id:String(ev.id), name:encodeURIComponent(ev.name||''), venue:encodeURIComponent(ev.venue||''), performer:encodeURIComponent(ev.performer||''), date:ev.date||ev.date_local||''})
       .then(d=>{
-        if(d.ok&&d.stats&&d.stats.count>0){
+        if(d.ok && d.stats){
           saveSnap('TE',ev.venue||'',ev.performer||'',String(ev.id),ev.name||'',ev.date||ev.date_local||'',d.stats);
-          appendToolHint(`${ev.name} — first snapshot saved: Floor $${d.stats.floor}, ${d.stats.count} listings`);
+          appendToolHint(`${ev.name} — stats snapshot: Floor $${d.stats.floor}, ${d.stats.count} listing groups, popularity ${((d.extras?.popularity_score||0)*100).toFixed(0)}%`);
         }
-      }).catch(()=>{}); // Silent fail — event is tracked regardless
+      }).catch(()=>{});
+
+    // Background: fetch Wikipedia for performer
+    if(ev.performer){
+      gasGet({action:'get_wiki', q:ev.performer+' NBA team'})
+        .then(w=>{
+          if(w.ok && w.extract){
+            appendChatMsg('ai',`**${w.title}**\n${w.extract.substring(0,300)}${w.extract.length>300?'...':''}\n${w.url}`);
+          }
+        }).catch(()=>{});
+    }
+
+    // Background: fetch weather if event date is within 15 days
+    if(ev.venue_city && (ev.date||ev.date_local)){
+      const eventDate = new Date(ev.date||ev.date_local);
+      const daysOut = Math.round((eventDate-new Date())/864e5);
+      if(daysOut>=0 && daysOut<=15){
+        gasGet({action:'get_weather', city:ev.venue_city, date:eventDate.toISOString().split('T')[0]})
+          .then(w=>{
+            if(w.ok){
+              appendChatMsg('ai',`**Weather for ${ev.venue_city} on ${w.date}**\n${w.weather_label} · High ${w.high_f}°F / Low ${w.low_f}°F · ${w.precip_pct}% precip · Wind ${w.wind_mph} mph`);
+            } else if(w.reason==='too_far_out'){
+              appendToolHint(`Weather available ${15-daysOut} days closer to event (${daysOut}d out)`);
+            }
+          }).catch(()=>{});
+      }
+    }
 
   }catch(e){
     btn.textContent='ERROR'; btn.style.color='var(--red)'; btn.style.borderColor='var(--red)'; btn.style.opacity='1';
@@ -1023,33 +1058,70 @@ async function trackFromChat(eid){
   }
 }
 
-// Get prices independently — graceful on no listings
+// Get prices — tries listings first, falls back to stats endpoint
 async function fetchChatListings(eid){
   const ev = chatEventStore[eid];
   if(!ev) return;
   const btn=document.getElementById(`gp-${eid}`);
   if(btn){ btn.textContent='LOADING...'; btn.disabled=true; }
   appendToolHint(`fetching listings for ${ev.name}...`);
+
+  const params = {
+    event_id: eid,
+    name: encodeURIComponent(ev.name||''),
+    venue: encodeURIComponent(ev.venue||''),
+    performer: encodeURIComponent(ev.performer||''),
+    date: ev.date||ev.date_local||''
+  };
+
   try{
-    const d=await gasGet({action:'fetch_te',event_id:eid,name:encodeURIComponent(ev.name||''),venue:encodeURIComponent(ev.venue||''),performer:encodeURIComponent(ev.performer||''),date:ev.date||ev.date_local||''});
-    if(d.error||!d.stats||d.stats.count===0){
-      // No listings yet — show gracefully, still allow tracking
-      appendChatMsg('ai',`${ev.name}\nNo active listings yet on Ticket Evolution — event may be too far out or sold through.\nYou can still TRACK it to monitor when listings appear.`);
-      if(btn){ btn.textContent='NO LISTINGS YET'; btn.style.opacity='0.5'; }
+    // Try listings first
+    const d = await gasGet({action:'fetch_te', ...params});
+
+    if(d.ok && d.stats && d.stats.count > 0){
+      // Listings found — show full stats
+      const s = d.stats;
+      appendChatMsg('ai', `${ev.name}\n` +
+        `Floor: $${s.floor} · Median: $${s.median} · Avg: $${s.avg} · Max: $${s.max}\n` +
+        `${s.count} active listings on Ticket Evolution`);
+      if(btn){ btn.textContent='PRICES SHOWN'; btn.style.opacity='0.4'; }
+
+      // Auto-save snapshot if tracked
+      const key = skey('TE', ev.venue||'', ev.performer||'');
+      if(tracked[key]) saveSnap('TE',ev.venue||'',ev.performer||'',eid,ev.name||'',ev.date||ev.date_local||'',s);
       return;
     }
-    const s=d.stats;
-    appendChatMsg('ai',`${ev.name}\nFloor: $${s.floor} · Median: $${s.median} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listings`);
-    if(btn){ btn.textContent='PRICES SHOWN'; btn.style.opacity='0.4'; }
 
-    // Auto-save snapshot if this event is already tracked
-    const key=skey('TE',ev.venue||'',ev.performer||'');
-    if(tracked[key]){
-      saveSnap('TE',ev.venue||'',ev.performer||'',eid,ev.name||'',ev.date||ev.date_local||'',s);
-      appendToolHint(`snapshot saved for ${ev.name}`);
+    // No listings — fall back to event stats endpoint
+    appendToolHint(`no active listings — pulling event stats for ${ev.name}...`);
+    const s = await gasGet({action:'fetch_te_stats', ...params});
+
+    if(s.ok && s.stats){
+      const st = s.stats;
+      const ext = s.extras||{};
+      appendChatMsg('ai',
+        `${ev.name}\n` +
+        `**Market stats** (${st.count} listing groups, ${ext.tickets_count?.toLocaleString()||'?'} tickets):\n` +
+        `Retail — Floor: $${st.floor} · Avg: $${st.avg} · Max: $${st.max}\n` +
+        `Wholesale — Floor: $${ext.wholesale_floor} · Avg: $${ext.wholesale_avg}\n` +
+        `Popularity: ${((ext.popularity_score||0)*100).toFixed(0)}% · State: ${ext.state||'unknown'}\n` +
+        `_(Median estimated — not available from stats endpoint)_`
+      );
+      if(btn){ btn.textContent='STATS SHOWN'; btn.style.opacity='0.4'; }
+
+      // Save stats-based snapshot — flagged as source:stats
+      const key = skey('TE', ev.venue||'', ev.performer||'');
+      if(tracked[key]) saveSnap('TE',ev.venue||'',ev.performer||'',eid,ev.name||'',ev.date||ev.date_local||'',st);
+    } else {
+      // Both endpoints returned nothing
+      appendChatMsg('ai',
+        `${ev.name}\nNo pricing data available on Ticket Evolution yet.\n` +
+        `You can still TRACK it — prices will appear as the event approaches.`
+      );
+      if(btn){ btn.textContent='NO DATA YET'; btn.style.opacity='0.5'; }
     }
   }catch(e){
-    appendChatMsg('ai',`Failed to fetch listings: ${e.message}`);
+    appendChatMsg('ai', `Failed to fetch pricing: ${e.message}`);
     if(btn){ btn.textContent='GET PRICES'; btn.disabled=false; }
   }
 }

@@ -270,7 +270,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 <div class="terminal">
 
 <div class="topbar">
-  <span id="term-title" style="font-size:13px;font-weight:600;letter-spacing:0.1em;">S4K TERMINAL <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.2.4</span></span>
+  <span id="term-title" style="font-size:13px;font-weight:600;letter-spacing:0.1em;">S4K TERMINAL <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.2.6</span></span>
   <div style="display:flex;gap:16px;"><span id="clock"></span><span>NYC</span></div>
 </div>
 
@@ -440,7 +440,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
         <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></div>TERMINAL NAME</div>
         <div class="ifield" style="max-width:300px;"><div class="ilbl">DISPLAY NAME</div><input class="tminput" id="term-name" placeholder="S4K TERMINAL" oninput="applyTermName(this.value)"/></div>
         <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></div>MARQUEE <span style="font-size:9px;color:var(--muted);margin-left:6px;">PEAK INTERNET</span></div>
-        <div class="ifield" style="max-width:420px;"><div class="ilbl">SCROLLING MESSAGE (blank to disable)</div><input class="tminput" id="marquee-text" placeholder="S4K TERMINAL · TICKET MARKET ANALYTICS · " oninput="applyMarquee(this.value)"/></div>
+        <div class="ifield" style="max-width:420px;"><div class="ilbl">SCROLLING MESSAGE (blank to disable)</div><input class="tminput" id="marquee-text" placeholder="S4K TERMINAL · TICKET MARKET ANALYTICS v5.2.6 · " oninput="applyMarquee(this.value)"/></div>
         <div id="marquee-preview" style="display:none;overflow:hidden;border:1px solid var(--border);padding:4px 0;margin-top:8px;background:var(--bg2);"><div id="marquee-inner" style="white-space:nowrap;font-size:10px;color:var(--amber);animation:marquee 12s linear infinite;display:inline-block;padding-left:100%;"></div></div>
       </div>
     </div>
@@ -520,7 +520,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // ================================================================
 // STATE
 // ================================================================
-const CKEY='s4k_v5', TKEY='s4k_theme_v1';
+const CKEY='s4k_v526', TKEY='s4k_theme_v1';
 let tracked={}, selKey=null, chart=null, cmode='price';
 let son={floor:false,med:true,avg:false,max:false};
 let feedItems=[], lfilt='all', ifilt=null;
@@ -838,7 +838,7 @@ function applyCustomColor(v,val){ currentTheme.custom[v]=val; document.documentE
 function syncColorPickers(){ const s=getComputedStyle(document.documentElement); const m={'--bg':'c-bg','--bg2':'c-bg2','--amber':'c-amber','--white':'c-white','--sg':'c-sg','--te':'c-te','--border':'c-border','--muted':'c-muted'}; Object.entries(m).forEach(([v,id])=>{const el=document.getElementById(id);if(!el)return;const val=s.getPropertyValue(v).trim();if(val.startsWith('#')&&val.length>=7)el.value=val.substring(0,7);}); }
 function applyBG(name,el){ currentTheme.bg=name; document.querySelectorAll('.bg-card').forEach(c=>c.classList.remove('active')); if(el)el.classList.add('active'); const p=BG_MAPS[name]||BG_MAPS.none,t=document.querySelector('.terminal'); t.style.backgroundImage=p.bg; t.style.backgroundSize=p.size; }
 function applyCursor(name,el){ currentTheme.cursor=name; document.querySelectorAll('.cur-card').forEach(c=>c.classList.remove('active')); if(el)el.classList.add('active'); document.body.style.cursor=name==='none'?'none':name; }
-function applyTermName(val){ currentTheme.name=val; const d=val.trim()||'S4K TERMINAL'; document.getElementById('term-title').innerHTML=`${d.toUpperCase()} <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.2.4</span>`; document.title=val.trim()||'S4K Terminal'; }
+function applyTermName(val){ currentTheme.name=val; const d=val.trim()||'S4K TERMINAL'; document.getElementById('term-title').innerHTML=`${d.toUpperCase()} <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.2.6</span>`; document.title=val.trim()||'S4K Terminal'; }
 function applyMarquee(val){ currentTheme.marquee=val; const p=document.getElementById('marquee-preview'),inn=document.getElementById('marquee-inner'); if(!val.trim()){p.style.display='none';removeMarqueeBar();return;} p.style.display='block';inn.textContent=val;applyMarqueeBar(val); }
 function applyMarqueeBar(text){ removeMarqueeBar();if(!text)return; const bar=document.createElement('div');bar.id='marquee-bar';bar.style.cssText='overflow:hidden;border-bottom:1px solid var(--border);padding:3px 0;background:var(--bg2);flex-shrink:0;';bar.innerHTML=`<div style="white-space:nowrap;font-size:10px;color:var(--amber);animation:marquee 14s linear infinite;display:inline-block;padding-left:100%;letter-spacing:0.1em;">${text}</div>`;document.querySelector('.statusbar').insertAdjacentElement('afterend',bar); }
 function removeMarqueeBar(){ const el=document.getElementById('marquee-bar');if(el)el.remove(); }

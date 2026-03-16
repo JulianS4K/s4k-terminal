@@ -270,7 +270,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 <div class="terminal">
 
 <div class="topbar">
-  <span id="term-title" style="font-size:13px;font-weight:600;letter-spacing:0.1em;">S4K TERMINAL <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.3.1</span></span>
+  <span id="term-title" style="font-size:13px;font-weight:600;letter-spacing:0.1em;">S4K TERMINAL <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.2.6</span></span>
   <div style="display:flex;gap:16px;"><span id="clock"></span><span>NYC</span></div>
 </div>
 
@@ -440,7 +440,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
         <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></div>TERMINAL NAME</div>
         <div class="ifield" style="max-width:300px;"><div class="ilbl">DISPLAY NAME</div><input class="tminput" id="term-name" placeholder="S4K TERMINAL" oninput="applyTermName(this.value)"/></div>
         <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></div>MARQUEE <span style="font-size:9px;color:var(--muted);margin-left:6px;">PEAK INTERNET</span></div>
-        <div class="ifield" style="max-width:420px;"><div class="ilbl">SCROLLING MESSAGE (blank to disable)</div><input class="tminput" id="marquee-text" placeholder="S4K TERMINAL · TICKET MARKET ANALYTICS v5.3.6 · " oninput="applyMarquee(this.value)"/></div>
+        <div class="ifield" style="max-width:420px;"><div class="ilbl">SCROLLING MESSAGE (blank to disable)</div><input class="tminput" id="marquee-text" placeholder="S4K TERMINAL · TICKET MARKET ANALYTICS v5.2.6 · " oninput="applyMarquee(this.value)"/></div>
         <div id="marquee-preview" style="display:none;overflow:hidden;border:1px solid var(--border);padding:4px 0;margin-top:8px;background:var(--bg2);"><div id="marquee-inner" style="white-space:nowrap;font-size:10px;color:var(--amber);animation:marquee 12s linear infinite;display:inline-block;padding-left:100%;"></div></div>
       </div>
     </div>
@@ -509,8 +509,15 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
           <span style="color:var(--white);">SLACK_WEBHOOK</span> · optional Slack push
         </div>
         <div class="sectitle" style="margin-top:20px;">
-          <div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--red);display:inline-block;"></div>
-          DEBUG LOG
+          <div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--cyan);display:inline-block;"></div>
+          LISTINGS ENDPOINT TEST
+          <button class="tmbtn" onclick="testListings()" style="font-size:9px;margin-left:8px;color:var(--cyan);border-color:var(--cyan);" id="btn-test-listings">RUN TEST</button>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">Tests 4 call variants against TEvo — checks which params the listings endpoint accepts</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+          <input class="tminput" id="test-event-id" placeholder="event_id to test (e.g. 3082803)" style="max-width:260px;font-size:11px;"/>
+        </div>
+        <div id="test-listings-result" style="font-family:var(--font);font-size:10px;color:var(--muted);line-height:1.9;max-height:280px;overflow-y:auto;background:var(--bg);border:1px solid var(--border);padding:8px 10px;display:none;"></div>
           <button class="tmbtn" onclick="loadDebug()" style="font-size:9px;margin-left:8px;" id="btn-debug">FETCH LOGS</button>
           <button class="tmbtn" onclick="clearDebugSheet()" style="font-size:9px;margin-left:4px;color:var(--red);border-color:var(--red);">CLEAR</button>
         </div>
@@ -529,12 +536,22 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // STATE
 // ================================================================
 const CKEY='s4k_v526', TKEY='s4k_theme_v1';
+// Migrate GAS URL from any previous CKEY version so users don't lose settings on version bump
+(function migrateCreds(){
+  if(localStorage.getItem(CKEY)) return; // already on current version
+  const prev=['s4k_v5','s4k_v52','s4k_v53'].reverse();
+  for(const k of prev){
+    const old=localStorage.getItem(k);
+    if(old){ localStorage.setItem(CKEY,old); break; }
+  }
+})();
 let tracked={}, selKey=null, chart=null, cmode='price';
 let son={floor:false,med:true,avg:false,max:false};
 let feedItems=[], lfilt='all', ifilt=null;
 let intelItems=[], intelTypeFilter='all';
 let chatHistory=[], chatWaiting=false;
 let feedPollTimer=null;
+const chatEventStore={}; // keyed by TEvo event ID, stores full event data for card actions
 
 // ================================================================
 // CORE UTILS
@@ -846,7 +863,7 @@ function applyCustomColor(v,val){ currentTheme.custom[v]=val; document.documentE
 function syncColorPickers(){ const s=getComputedStyle(document.documentElement); const m={'--bg':'c-bg','--bg2':'c-bg2','--amber':'c-amber','--white':'c-white','--sg':'c-sg','--te':'c-te','--border':'c-border','--muted':'c-muted'}; Object.entries(m).forEach(([v,id])=>{const el=document.getElementById(id);if(!el)return;const val=s.getPropertyValue(v).trim();if(val.startsWith('#')&&val.length>=7)el.value=val.substring(0,7);}); }
 function applyBG(name,el){ currentTheme.bg=name; document.querySelectorAll('.bg-card').forEach(c=>c.classList.remove('active')); if(el)el.classList.add('active'); const p=BG_MAPS[name]||BG_MAPS.none,t=document.querySelector('.terminal'); t.style.backgroundImage=p.bg; t.style.backgroundSize=p.size; }
 function applyCursor(name,el){ currentTheme.cursor=name; document.querySelectorAll('.cur-card').forEach(c=>c.classList.remove('active')); if(el)el.classList.add('active'); document.body.style.cursor=name==='none'?'none':name; }
-function applyTermName(val){ currentTheme.name=val; const d=val.trim()||'S4K TERMINAL'; document.getElementById('term-title').innerHTML=`${d.toUpperCase()} <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.2.9</span>`; document.title=val.trim()||'S4K Terminal'; }
+function applyTermName(val){ currentTheme.name=val; const d=val.trim()||'S4K TERMINAL'; document.getElementById('term-title').innerHTML=`${d.toUpperCase()} <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.2.6</span>`; document.title=val.trim()||'S4K Terminal'; }
 function applyMarquee(val){ currentTheme.marquee=val; const p=document.getElementById('marquee-preview'),inn=document.getElementById('marquee-inner'); if(!val.trim()){p.style.display='none';removeMarqueeBar();return;} p.style.display='block';inn.textContent=val;applyMarqueeBar(val); }
 function applyMarqueeBar(text){ removeMarqueeBar();if(!text)return; const bar=document.createElement('div');bar.id='marquee-bar';bar.style.cssText='overflow:hidden;border-bottom:1px solid var(--border);padding:3px 0;background:var(--bg2);flex-shrink:0;';bar.innerHTML=`<div style="white-space:nowrap;font-size:10px;color:var(--amber);animation:marquee 14s linear infinite;display:inline-block;padding-left:100%;letter-spacing:0.1em;">${text}</div>`;document.querySelector('.statusbar').insertAdjacentElement('afterend',bar); }
 function removeMarqueeBar(){ const el=document.getElementById('marquee-bar');if(el)el.remove(); }
@@ -937,18 +954,17 @@ function appendToolHint(text){
   div.textContent=`⚙ ${text}`; el.appendChild(div); el.scrollTop=el.scrollHeight;
 }
 
-// Event store — keyed by id, avoids fragile inline onclick string passing
-const chatEventStore = {};
-
-function appendEventCards(events,listingsFound){
+function appendEventCards(events, listingsFound){
   const el=document.getElementById('chat-messages');
   const wrap=document.createElement('div'); wrap.style.cssText='padding:0 0 8px 0;';
   const listingsMap={};
   (listingsFound||[]).forEach(l=>{if(l.event_id)listingsMap[String(l.event_id)]=l;});
   const trackedIds=new Set(Object.values(tracked).map(t=>String(t.event_id)));
 
+  // Pull feed items once for all cards
+  const allFeedItems=[...feedItems]; // already loaded from F4 poll
+
   events.forEach(ev=>{
-    // Store full event data by ID — no inline string passing needed
     chatEventStore[String(ev.id)] = ev;
 
     const card=document.createElement('div'); card.className='te-event-card';
@@ -958,7 +974,49 @@ function appendEventCards(events,listingsFound){
     const avail=ev.available_count||0;
     const availColor=avail>200?'var(--green)':avail>50?'var(--amber)':avail>0?'var(--rss)':'var(--muted)';
 
-    // Build card HTML — no data in onclick, just the ID
+    // KPI movement from tracked history
+    let kpiHtml='';
+    if(isTracked){
+      const tKey=Object.keys(tracked).find(k=>String(tracked[k].event_id)===String(ev.id));
+      const tev=tKey?tracked[tKey]:null;
+      if(tev&&tev.history&&tev.history.length){
+        const lat=tev.history[tev.history.length-1];
+        const prev=tev.history.length>1?tev.history[tev.history.length-2]:null;
+        const fd=prev?lat.floor-prev.floor:null;
+        const cd=prev?lat.count-prev.count:null;
+        kpiHtml=`<div style="display:flex;gap:10px;padding:5px 0;border-top:1px solid var(--border);margin-top:4px;flex-wrap:wrap;">
+          <span style="font-size:10px;"><span style="color:var(--muted);">FLOOR </span><span style="color:var(--cyan);">$${lat.floor}</span>${fd!==null?` <span style="${fd>0?'color:var(--red)':'color:var(--green)'}">${fd>0?'▲':'▼'}$${Math.abs(fd)}</span>`:''}</span>
+          <span style="font-size:10px;"><span style="color:var(--muted);">AVG </span><span style="color:var(--amber);">$${lat.avg}</span></span>
+          <span style="font-size:10px;"><span style="color:var(--muted);">LST </span><span style="color:#A5D6A7;">${(lat.count||0).toLocaleString()}</span>${cd!==null?` <span style="${cd<0?'color:var(--red)':'color:var(--green)'}">${cd>0?'+':''}${cd}</span>`:''}</span>
+          <span style="font-size:9px;color:var(--muted);margin-left:auto;">${tev.history.length} snaps</span>
+        </div>`;
+      }
+    }
+
+    // F4 feed matches — search rss_live for this specific event's teams/venue
+    const feedTerms=[ev.name, ev.performer, ev.venue]
+      .flatMap(s=>(s||'').toLowerCase().split(/\s+at\s+|\s+vs\.?\s+|\s+@\s+/))
+      .map(s=>s.replace(/[^\w\s]/g,'').trim())
+      .filter(s=>s.length>3);
+    const feedMatches=allFeedItems.filter(item=>{
+      const text=((item.title||item.item_title||'')+' '+(item.desc||item.item_description||'')).toLowerCase();
+      return feedTerms.some(t=>text.includes(t));
+    }).slice(0,3);
+
+    let feedHtml='';
+    if(feedMatches.length){
+      feedHtml=`<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,107,53,0.3);">
+        <div style="font-size:9px;color:var(--rss);letter-spacing:.08em;margin-bottom:4px;">F4 FEED · ${feedMatches.length} RELATED</div>`+
+        feedMatches.map(item=>`
+          <div style="padding:3px 0;font-size:10px;line-height:1.4;">
+            <span style="color:var(--white);">${(item.title||item.item_title||'').substring(0,80)}${(item.title||item.item_title||'').length>80?'...':''}</span>
+            ${item.impact?`<span style="margin-left:6px;font-size:9px;padding:0 4px;border:1px solid;border-radius:2px;color:${item.impact==='High'?'var(--red)':item.impact==='Medium'?'var(--amber)':'var(--green)'};border-color:${item.impact==='High'?'var(--red)':item.impact==='Medium'?'var(--amber)':'var(--green)'};">${item.impact}</span>`:''}
+            <div style="color:var(--muted);font-size:9px;">${item.source||item.feed_title||''} · ${ago(item.pubDate||item.item_published||item.received_ts||'')}</div>
+            ${item.reason?`<div style="color:var(--amber);font-size:9px;">${item.reason}</div>`:''}
+          </div>`).join('')+
+        `</div>`;
+    }
+
     card.innerHTML=`
       <div class="te-event-name">${ev.name}</div>
       <div class="te-event-meta">
@@ -975,22 +1033,36 @@ function appendEventCards(events,listingsFound){
         <span class="te-stat"><span>AVG</span><span style="color:var(--amber);">$${lst.stats.avg}</span></span>
         <span class="te-stat"><span>LST</span><span style="color:#A5D6A7;">${lst.stats.count}</span></span>
       </div>`:''}
+      ${kpiHtml}
+      ${feedHtml}
+      <div id="weather-${ev.id}" style="font-size:10px;color:var(--muted);padding:3px 0;display:none;border-top:1px solid var(--border);margin-top:4px;"></div>
       <div class="te-card-btns">
         <button id="tc-${ev.id}" class="te-btn track ${isTracked?'done':''}" data-evid="${ev.id}" ${isTracked?'disabled':''}>${isTracked?'TRACKED ✓':'TRACK'}</button>
         <button id="gp-${ev.id}" class="te-btn prices" data-evid="${ev.id}">GET PRICES</button>
       </div>`;
 
-    // Attach listeners using the stored data — no string mangling
-    const trackBtn = card.querySelector(`#tc-${ev.id}`);
-    const pricesBtn = card.querySelector(`#gp-${ev.id}`);
-
-    if(!isTracked && trackBtn){
-      trackBtn.addEventListener('click', () => trackFromChat(String(ev.id)));
-    }
+    const trackBtn=card.querySelector(`#tc-${ev.id}`);
+    const pricesBtn=card.querySelector(`#gp-${ev.id}`);
+    if(!isTracked&&trackBtn) trackBtn.addEventListener('click',()=>trackFromChat(String(ev.id)));
     if(pricesBtn){
-      // If we already have prices from listings_found, update the button
       if(lst){ pricesBtn.textContent='PRICES SHOWN'; pricesBtn.disabled=true; pricesBtn.style.opacity='0.4'; }
-      else { pricesBtn.addEventListener('click', () => fetchChatListings(String(ev.id))); }
+      else { pricesBtn.addEventListener('click',()=>fetchChatListings(String(ev.id))); }
+    }
+
+    // Auto-fetch weather inline if within 15 days
+    if(ev.venue_city&&(ev.date||ev.date_local)){
+      const daysOut=Math.round((new Date(ev.date||ev.date_local)-new Date())/864e5);
+      if(daysOut>=0&&daysOut<=15){
+        const wEl=card.querySelector(`#weather-${ev.id}`);
+        gasGet({action:'get_weather',city:encodeURIComponent(ev.venue_city),date:new Date(ev.date||ev.date_local).toISOString().split('T')[0]})
+          .then(w=>{
+            if(w.ok&&wEl){
+              wEl.style.display='block';
+              const precipColor=w.precip_pct>30?'var(--rss)':'var(--muted)';
+              wEl.innerHTML=`${w.weather_label} · ${w.high_f}°/${w.low_f}°F · <span style="color:${precipColor};">${w.precip_pct}% precip</span> · ${w.wind_mph}mph wind`;
+            }
+          }).catch(()=>{});
+      }
     }
 
     wrap.appendChild(card);
@@ -1131,6 +1203,32 @@ async function fetchChatListings(eid){
     appendChatMsg('ai', `Failed to fetch: ${e.message}`);
     if(btn){ btn.textContent='GET PRICES'; btn.disabled=false; }
   }
+}
+
+async function testListings(){
+  const eid = document.getElementById('test-event-id').value.trim();
+  const btn = document.getElementById('btn-test-listings');
+  const el  = document.getElementById('test-listings-result');
+  btn.disabled=true; btn.textContent='TESTING...';
+  el.style.display='block'; el.textContent='Running 4 tests against TEvo /v9/listings...';
+  try{
+    const params = {action:'test_listings'};
+    if(eid) params.event_id = eid;
+    const d = await gasGet(params);
+    if(d.error){ el.textContent=`ERROR: ${d.error}`; btn.disabled=false; btn.textContent='RUN TEST'; return; }
+    const r = d.results||{};
+    el.innerHTML = Object.entries(r).map(([test, res])=>{
+      const ok = res.status===200;
+      const col = ok?'var(--green)':res.status===401?'var(--red)':'var(--amber)';
+      return `<div style="border-bottom:1px solid var(--border);padding:4px 0;">
+        <span style="color:${col};font-weight:500;">${test}</span>
+        <span style="color:var(--muted);margin-left:8px;">HTTP ${res.status||'ERR'}</span>
+        ${res.error?`<div style="color:var(--red);padding-left:10px;">${res.error}</div>`:''}
+        <div style="color:var(--muted);padding-left:10px;word-break:break-all;">${res.body||''}</div>
+      </div>`;
+    }).join('');
+  }catch(e){ el.textContent=`FAILED: ${e.message}`; }
+  btn.disabled=false; btn.textContent='RUN TEST';
 }
 
 // ================================================================

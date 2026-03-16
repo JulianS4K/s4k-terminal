@@ -927,50 +927,131 @@ function appendToolHint(text){
   div.textContent=`⚙ ${text}`; el.appendChild(div); el.scrollTop=el.scrollHeight;
 }
 
+// Event store — keyed by id, avoids fragile inline onclick string passing
+const chatEventStore = {};
+
 function appendEventCards(events,listingsFound){
   const el=document.getElementById('chat-messages');
   const wrap=document.createElement('div'); wrap.style.cssText='padding:0 0 8px 0;';
   const listingsMap={};
   (listingsFound||[]).forEach(l=>{if(l.event_id)listingsMap[String(l.event_id)]=l;});
   const trackedIds=new Set(Object.values(tracked).map(t=>String(t.event_id)));
+
   events.forEach(ev=>{
+    // Store full event data by ID — no inline string passing needed
+    chatEventStore[String(ev.id)] = ev;
+
     const card=document.createElement('div'); card.className='te-event-card';
-    const dateStr=ev.date_local||ev.date?new Date(ev.date_local||ev.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',weekday:'short'}):'TBD';
+    const dateStr=(ev.date_local||ev.date)?new Date(ev.date_local||ev.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',weekday:'short'}):'TBD';
     const isTracked=trackedIds.has(String(ev.id));
     const lst=listingsMap[String(ev.id)];
+
+    // Build card HTML — no data in onclick, just the ID
     card.innerHTML=`
       <div class="te-event-name">${ev.name}</div>
-      <div class="te-event-meta"><span>${ev.venue}${ev.venue_city?', '+ev.venue_city:''}</span><span>${dateStr}</span></div>
-      ${lst?`<div class="te-event-stats"><span class="te-stat"><span>FLOOR</span><span style="color:var(--cyan);">$${lst.stats.floor}</span></span><span class="te-stat"><span>MEDIAN</span><span style="color:var(--purple);">$${lst.stats.median}</span></span><span class="te-stat"><span>AVG</span><span style="color:var(--amber);">$${lst.stats.avg}</span></span><span class="te-stat"><span>LST</span><span style="color:#A5D6A7;">${lst.stats.count}</span></span></div>`:''}
+      <div class="te-event-meta">
+        <span>${ev.venue}${ev.venue_city?', '+ev.venue_city:''}</span>
+        <span>${dateStr}</span>
+      </div>
+      ${lst?`<div class="te-event-stats">
+        <span class="te-stat"><span>FLOOR</span><span style="color:var(--cyan);">$${lst.stats.floor}</span></span>
+        <span class="te-stat"><span>MEDIAN</span><span style="color:var(--purple);">$${lst.stats.median}</span></span>
+        <span class="te-stat"><span>AVG</span><span style="color:var(--amber);">$${lst.stats.avg}</span></span>
+        <span class="te-stat"><span>LST</span><span style="color:#A5D6A7;">${lst.stats.count}</span></span>
+      </div>`:''}
       <div class="te-card-btns">
-        <button id="tc-${ev.id}" class="te-btn track ${isTracked?'done':''}" onclick="trackFromChat('${ev.id}','${(ev.name||'').replace(/'/g,'')}','${(ev.venue||'').replace(/'/g,'')}','${(ev.performer||'').replace(/'/g,'')}','${ev.date||''}')" ${isTracked?'disabled':''}>${isTracked?'TRACKED ✓':'TRACK'}</button>
-        ${!lst?`<button class="te-btn prices" onclick="fetchChatListings('${ev.id}','${(ev.name||'').replace(/'/g,'')}','${(ev.venue||'').replace(/'/g,'')}','${(ev.performer||'').replace(/'/g,'')}','${ev.date||''}')">GET PRICES</button>`:''}
+        <button id="tc-${ev.id}" class="te-btn track ${isTracked?'done':''}" data-evid="${ev.id}" ${isTracked?'disabled':''}>${isTracked?'TRACKED ✓':'TRACK'}</button>
+        <button id="gp-${ev.id}" class="te-btn prices" data-evid="${ev.id}">GET PRICES</button>
       </div>`;
+
+    // Attach listeners using the stored data — no string mangling
+    const trackBtn = card.querySelector(`#tc-${ev.id}`);
+    const pricesBtn = card.querySelector(`#gp-${ev.id}`);
+
+    if(!isTracked && trackBtn){
+      trackBtn.addEventListener('click', () => trackFromChat(String(ev.id)));
+    }
+    if(pricesBtn){
+      // If we already have prices from listings_found, update the button
+      if(lst){ pricesBtn.textContent='PRICES SHOWN'; pricesBtn.disabled=true; pricesBtn.style.opacity='0.4'; }
+      else { pricesBtn.addEventListener('click', () => fetchChatListings(String(ev.id))); }
+    }
+
     wrap.appendChild(card);
   });
   el.appendChild(wrap); el.scrollTop=el.scrollHeight;
 }
 
-async function trackFromChat(eid,name,venue,perf,date){
+// Track without requiring listings — registers event for monitoring immediately
+async function trackFromChat(eid){
+  const ev = chatEventStore[eid];
+  if(!ev) return;
   const btn=document.getElementById(`tc-${eid}`); if(!btn||btn.disabled)return;
-  btn.textContent='FETCHING...'; btn.style.opacity='0.5';
+
+  btn.textContent='TRACKING...'; btn.style.opacity='0.5';
   try{
-    const d=await gasGet({action:'fetch_te',event_id:eid,name:encodeURIComponent(name),venue:encodeURIComponent(venue),performer:encodeURIComponent(perf),date});
-    if(d.error){btn.textContent='ERROR';btn.style.color='var(--red)';btn.style.borderColor='var(--red)';btn.style.opacity='1';return;}
-    await saveSnap('TE',venue,perf,eid,name,date,d.stats);
+    // Register the event for tracking — no snapshot needed yet
+    // saveSnap with zero stats works; next refresh will populate real prices
+    const key = skey('TE', ev.venue||'', ev.performer||'');
+    const evRecord = {
+      key, src:'TE', event_id:String(ev.id),
+      name:ev.name||'', venue:ev.venue||'', performer:ev.performer||'',
+      date:ev.date||ev.date_local||'', added_at:new Date().toISOString(), history:[]
+    };
+
+    // Write to Sheets — track record only, no snapshot required
+    await gasPost({action:'track', event:evRecord});
+    tracked[key] = evRecord;
+    renderSidebar(); updateTotal();
+
     btn.textContent='TRACKED ✓'; btn.classList.add('done'); btn.disabled=true; btn.style.opacity='1';
-    toast(`TRACKED: ${name}`); appendToolHint(`${name} tracked · switch to F1 to see chart`);
-  }catch(e){btn.textContent='FAILED';btn.style.color='var(--red)';btn.style.opacity='1';}
+    toast(`TRACKING: ${ev.name}`);
+    appendToolHint(`${ev.name} added to watchlist · refresh in F1 to pull prices`);
+
+    // Now try to get a snapshot in background — don't block on failure
+    gasGet({action:'fetch_te',event_id:String(ev.id),name:encodeURIComponent(ev.name||''),venue:encodeURIComponent(ev.venue||''),performer:encodeURIComponent(ev.performer||''),date:ev.date||ev.date_local||''})
+      .then(d=>{
+        if(d.ok&&d.stats&&d.stats.count>0){
+          saveSnap('TE',ev.venue||'',ev.performer||'',String(ev.id),ev.name||'',ev.date||ev.date_local||'',d.stats);
+          appendToolHint(`${ev.name} — first snapshot saved: Floor $${d.stats.floor}, ${d.stats.count} listings`);
+        }
+      }).catch(()=>{}); // Silent fail — event is tracked regardless
+
+  }catch(e){
+    btn.textContent='ERROR'; btn.style.color='var(--red)'; btn.style.borderColor='var(--red)'; btn.style.opacity='1';
+    appendToolHint(`Track failed: ${e.message}`);
+  }
 }
 
-async function fetchChatListings(eid,name,venue,perf,date){
-  appendToolHint(`fetching listings for ${name}...`);
+// Get prices independently — graceful on no listings
+async function fetchChatListings(eid){
+  const ev = chatEventStore[eid];
+  if(!ev) return;
+  const btn=document.getElementById(`gp-${eid}`);
+  if(btn){ btn.textContent='LOADING...'; btn.disabled=true; }
+  appendToolHint(`fetching listings for ${ev.name}...`);
   try{
-    const d=await gasGet({action:'fetch_te',event_id:eid,name:encodeURIComponent(name),venue:encodeURIComponent(venue),performer:encodeURIComponent(perf),date});
-    if(d.error){appendChatMsg('ai',`Could not fetch listings: ${d.error}`);return;}
+    const d=await gasGet({action:'fetch_te',event_id:eid,name:encodeURIComponent(ev.name||''),venue:encodeURIComponent(ev.venue||''),performer:encodeURIComponent(ev.performer||''),date:ev.date||ev.date_local||''});
+    if(d.error||!d.stats||d.stats.count===0){
+      // No listings yet — show gracefully, still allow tracking
+      appendChatMsg('ai',`${ev.name}\nNo active listings yet on Ticket Evolution — event may be too far out or sold through.\nYou can still TRACK it to monitor when listings appear.`);
+      if(btn){ btn.textContent='NO LISTINGS YET'; btn.style.opacity='0.5'; }
+      return;
+    }
     const s=d.stats;
-    appendChatMsg('ai',`${name}\nFloor: $${s.floor} · Median: $${s.median} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listings`);
-  }catch(e){appendChatMsg('ai',`Failed to fetch: ${e.message}`);}
+    appendChatMsg('ai',`${ev.name}\nFloor: $${s.floor} · Median: $${s.median} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listings`);
+    if(btn){ btn.textContent='PRICES SHOWN'; btn.style.opacity='0.4'; }
+
+    // Auto-save snapshot if this event is already tracked
+    const key=skey('TE',ev.venue||'',ev.performer||'');
+    if(tracked[key]){
+      saveSnap('TE',ev.venue||'',ev.performer||'',eid,ev.name||'',ev.date||ev.date_local||'',s);
+      appendToolHint(`snapshot saved for ${ev.name}`);
+    }
+  }catch(e){
+    appendChatMsg('ai',`Failed to fetch listings: ${e.message}`);
+    if(btn){ btn.textContent='GET PRICES'; btn.disabled=false; }
+  }
 }
 
 // ================================================================

@@ -270,7 +270,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 <div class="terminal">
 
 <div class="topbar">
-  <span id="term-title" style="font-size:13px;font-weight:600;letter-spacing:0.1em;">S4K TERMINAL <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.2.2</span></span>
+  <span id="term-title" style="font-size:13px;font-weight:600;letter-spacing:0.1em;">S4K TERMINAL <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.0</span></span>
   <div style="display:flex;gap:16px;"><span id="clock"></span><span>NYC</span></div>
 </div>
 
@@ -1070,7 +1070,6 @@ async function trackFromChat(eid){
   }
 }
 
-// Get prices — tries listings first, falls back to stats endpoint
 async function fetchChatListings(eid){
   const ev = chatEventStore[eid];
   if(!ev) return;
@@ -1079,61 +1078,42 @@ async function fetchChatListings(eid){
   appendToolHint(`fetching listings for ${ev.name}...`);
 
   const params = {
+    action:   'fetch_te',
     event_id: eid,
-    name: encodeURIComponent(ev.name||''),
-    venue: encodeURIComponent(ev.venue||''),
-    performer: encodeURIComponent(ev.performer||''),
-    date: ev.date||ev.date_local||''
+    name:     encodeURIComponent(ev.name||''),
+    venue:    encodeURIComponent(ev.venue||''),
+    performer:encodeURIComponent(ev.performer||''),
+    date:     ev.date||ev.date_local||''
   };
 
   try{
-    // Try listings first
-    const d = await gasGet({action:'fetch_te', ...params});
+    const d = await gasGet(params);
 
     if(d.ok && d.stats && d.stats.count > 0){
-      // Listings found — show full stats
-      const s = d.stats;
-      appendChatMsg('ai', `${ev.name}\n` +
-        `Floor: $${s.floor} · Median: $${s.median} · Avg: $${s.avg} · Max: $${s.max}\n` +
-        `${s.count} active listings on Ticket Evolution`);
+      const s=d.stats, w=d.wholesale_stats||{}, own=d.owned||{};
+      const src=d.source==='stats'?'aggregate stats':'live listings';
+      let msg=`${ev.name}\n`;
+      msg+=`Floor: $${s.floor} · Median: $${s.median} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listings`;
+      if(w.floor&&w.floor!==s.floor) msg+=`\nWholesale floor: $${w.floor} · avg: $${w.avg}`;
+      if(own.count>0) msg+=`\nYour office: ${own.count} listing${own.count!==1?'s':''}${own.stats?` · floor $${own.stats.floor}`:''}`;
+      if(d.delivery?.in_hand_count>0) msg+=`\n${d.delivery.in_hand_count} in-hand · ${d.delivery.instant_delivery_count||0} instant delivery`;
+      if(d.source==='stats') msg+=`\n(aggregate data — no active resale listings)`;
+      appendChatMsg('ai', msg);
       if(btn){ btn.textContent='PRICES SHOWN'; btn.style.opacity='0.4'; }
 
       // Auto-save snapshot if tracked
-      const key = skey('TE', ev.venue||'', ev.performer||'', eid);
+      const key=skey('TE',ev.venue||'',ev.performer||'',eid);
       if(tracked[key]) saveSnap('TE',ev.venue||'',ev.performer||'',eid,ev.name||'',ev.date||ev.date_local||'',s);
       return;
     }
 
-    // No listings — fall back to event stats endpoint
-    appendToolHint(`no active listings — pulling event stats for ${ev.name}...`);
-    const s = await gasGet({action:'fetch_te_stats', ...params});
+    // GAS returned error or zero count
+    const reason = d.error || 'no listings or stats available';
+    appendChatMsg('ai', `${ev.name}\nTEvo: ${reason}`);
+    if(btn){ btn.textContent='NO DATA'; btn.style.opacity='0.5'; }
 
-    if(s.ok && s.stats){
-      const st = s.stats;
-      const ext = s.extras||{};
-      appendChatMsg('ai',
-        `${ev.name}\n` +
-        `**Market stats** (${st.count} listing groups, ${ext.tickets_count?.toLocaleString()||'?'} tickets):\n` +
-        `Retail — Floor: $${st.floor} · Avg: $${st.avg} · Max: $${st.max}\n` +
-        `Wholesale — Floor: $${ext.wholesale_floor} · Avg: $${ext.wholesale_avg}\n` +
-        `Popularity: ${((ext.popularity_score||0)*100).toFixed(0)}% · State: ${ext.state||'unknown'}\n` +
-        `_(Median estimated — not available from stats endpoint)_`
-      );
-      if(btn){ btn.textContent='STATS SHOWN'; btn.style.opacity='0.4'; }
-
-      // Save stats-based snapshot
-      const key = skey('TE', ev.venue||'', ev.performer||'', eid);
-      if(tracked[key]) saveSnap('TE',ev.venue||'',ev.performer||'',eid,ev.name||'',ev.date||ev.date_local||'',st);
-    } else {
-      // Both endpoints returned nothing
-      appendChatMsg('ai',
-        `${ev.name}\nNo pricing data available on Ticket Evolution yet.\n` +
-        `You can still TRACK it — prices will appear as the event approaches.`
-      );
-      if(btn){ btn.textContent='NO DATA YET'; btn.style.opacity='0.5'; }
-    }
   }catch(e){
-    appendChatMsg('ai', `Failed to fetch pricing: ${e.message}`);
+    appendChatMsg('ai', `Failed to fetch: ${e.message}`);
     if(btn){ btn.textContent='GET PRICES'; btn.disabled=false; }
   }
 }

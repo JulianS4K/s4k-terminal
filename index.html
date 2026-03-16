@@ -951,6 +951,8 @@ function appendEventCards(events,listingsFound){
     const dateStr=(ev.date_local||ev.date)?new Date(ev.date_local||ev.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',weekday:'short'}):'TBD';
     const isTracked=trackedIds.has(String(ev.id));
     const lst=listingsMap[String(ev.id)];
+    const avail=ev.available_count||0;
+    const availColor=avail>200?'var(--green)':avail>50?'var(--amber)':avail>0?'var(--rss)':'var(--muted)';
 
     // Build card HTML — no data in onclick, just the ID
     card.innerHTML=`
@@ -958,6 +960,10 @@ function appendEventCards(events,listingsFound){
       <div class="te-event-meta">
         <span>${ev.venue}${ev.venue_city?', '+ev.venue_city:''}</span>
         <span>${dateStr}</span>
+        <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+          <span style="font-size:10px;color:${availColor};">${avail>0?avail+' lstg':'no listings'}</span>
+          ${ev.popularity?`<span style="font-size:10px;color:var(--muted);">${(ev.popularity*100).toFixed(0)}% pop</span>`:''}
+        </span>
       </div>
       ${lst?`<div class="te-event-stats">
         <span class="te-stat"><span>FLOOR</span><span style="color:var(--cyan);">$${lst.stats.floor}</span></span>

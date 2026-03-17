@@ -674,7 +674,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // STATE
 // ================================================================
 const CKEY='s4k_v526', TKEY='s4k_theme_v1';
-const APP_VERSION='Alpha 1.1'; // single source of truth — update on every release
+const APP_VERSION='Alpha 1.2'; // single source of truth — update on every release
 // Migrate GAS URL from any previous CKEY version so users don't lose settings on version bump
 (function migrateCreds(){
   if(localStorage.getItem(CKEY)) return; // already on current version
@@ -897,7 +897,9 @@ const FS = (() => {
   }
 
   return {getDoc, query, getEventSnapshots, getFeedItems,
-          getEventIndex, getEspnItems, testConnection, getToken};
+          getEventIndex, getEspnItems, testConnection, getToken,
+          getProjectId: async () => { await getToken(); return _projectId; },
+          _decodeFields: decodeFields};
 })();
 async function testConn(){
   const box=document.getElementById('conn-box'); box.style.display='block'; box.className='connbox'; box.textContent='TESTING...';
@@ -1007,40 +1009,66 @@ async function loadTracked(){
     const d=await gasGet({action:'tracked'});
     tracked={};
     (d.events||[]).forEach(ev=>{
-      // Always use canonical key regardless of what's stored
       const canonicalKey = ev.src==='TE'&&ev.event_id ? `TE::${ev.event_id}` : ev.key;
-      // Deduplicate in memory — if event_id already exists, skip
       const alreadyHas = ev.src==='TE' && Object.values(tracked).some(t=>String(t.event_id)===String(ev.event_id));
       if(!alreadyHas) tracked[canonicalKey]={...ev, key:canonicalKey, history:[]};
     });
-    for(const k of Object.keys(tracked)) await loadHistory(k);
+
+    // Load all histories — try Firestore batch first, fall back to sequential GAS
+    await loadAllHistories();
     renderSidebar(); updateTotal(); setSt('READY');
+
+    // Start real-time listener after initial load
+    startRealtimeListener();
   }catch(e){ setSt('ADD GAS URL IN F8'); }
 }
+
+// Load histories for all tracked events in parallel
+async function loadAllHistories(){
+  const keys = Object.keys(tracked);
+  if(!keys.length) return;
+
+  // Try Firestore batch — query tevo/ for all event IDs at once
+  // Firestore doesn't support IN queries on REST without indexes, so
+  // fire parallel queries (one per event, non-blocking)
+  const promises = keys.map(k => loadHistory(k));
+  await Promise.allSettled(promises); // allSettled = never throws, all run
+}
 async function loadHistory(key){
-  const ev=tracked[key]; if(!ev)return;
-  try{
-    // Direct Firestore read — tevo/ collection, ordered by snapshot_ts
-    const snaps = await FS.getEventSnapshots(ev.event_id, 200);
-    ev.history = snaps
-      .map(s=>({
-        ts:     s.snapshot_ts||s.received_ts||'',
-        floor:  Math.round(Number(s.floor||0)),
-        avg:    Math.round(Number(s.avg||0)),
-        median: Math.round(Number(s.median||0)),
-        max:    Math.round(Number(s.max||0)),
-        count:  Math.round(Number(s.count||0))
-      }))
-      .filter(s=>s.floor>0 && s.avg>0 && !isNaN(s.floor))
-      .sort((a,b)=>a.ts.localeCompare(b.ts)); // oldest first for chart
-  }catch(e){
-    // Fallback to GAS if Firestore not yet configured
-    try{
-      const d=await gasGet({action:'history',src:ev.src,event_id:ev.event_id});
-      ev.history=(d.rows||[])
-        .map(r=>({ts:r.snapshot_ts,floor:Math.round(Number(r.floor)||0),avg:Math.round(Number(r.avg)||0),median:Math.round(Number(r.median)||0),max:Math.round(Number(r.max)||0),count:Math.round(Number(r.count)||0)}))
-        .filter(s=>s.floor>0&&s.avg>0&&!isNaN(s.floor)&&!isNaN(s.avg));
-    }catch(e2){ ev.history=[]; }
+  const ev=tracked[key]; if(!ev) return;
+  // Try Firestore first, then GAS Sheets fallback
+  let loaded = false;
+  try {
+    const snaps = await FS.getEventSnapshots(ev.event_id, 500);
+    if(snaps && snaps.length > 0) {
+      ev.history = snaps
+        .map(s=>({
+          ts:     s.snapshot_ts||s.received_ts||'',
+          floor:  Math.round(Number(s.floor||0)),
+          avg:    Math.round(Number(s.avg||0)),
+          median: Math.round(Number(s.median||0)),
+          max:    Math.round(Number(s.max||0)),
+          count:  Math.round(Number(s.count||0))
+        }))
+        .filter(s=>s.floor>0 && s.avg>0 && !isNaN(s.floor))
+        .sort((a,b)=>a.ts.localeCompare(b.ts));
+      loaded = true;
+    }
+  } catch(fsErr) {
+    // Firestore not ready yet — token endpoint needs new deploy
+  }
+  if(!loaded) {
+    // Fallback: GAS reads from Sheets TE_snapshots
+    try {
+      const d = await gasGet({action:'history', src:ev.src, event_id:ev.event_id});
+      ev.history = (d.rows||[])
+        .map(r=>({
+          ts:r.snapshot_ts, floor:Math.round(Number(r.floor)||0),
+          avg:Math.round(Number(r.avg)||0), median:Math.round(Number(r.median)||0),
+          max:Math.round(Number(r.max)||0), count:Math.round(Number(r.count)||0)
+        }))
+        .filter(s=>s.floor>0 && s.avg>0 && !isNaN(s.floor));
+    } catch(gasErr) { ev.history=[]; }
   }
 }
 async function saveSnap(src,venue,perf,eid,name,date,stats,dataSource){
@@ -2159,34 +2187,208 @@ function renderF4Portfolio(){
 // ================================================================
 // 5-MINUTE SNAPSHOT POLL — silently detects hourly auto-refresh
 // ================================================================
-let snapshotPollTimer=null, lastSnapshotTs=null;
+// ================================================================
+// REAL-TIME FIRESTORE LISTENER
+// ================================================================
+// Replaces the old 5-min checkForNewSnapshots poll.
+// Uses Firestore REST :listen endpoint (Server-Sent Events).
+// When GAS writes a new tevo/ snapshot, terminal receives it
+// within seconds and updates only the affected event's chart.
+//
+// Firestore :listen uses long-polling (keepalive HTTP connection).
+// If connection drops (tab sleep, network), auto-reconnects.
+// Falls back to 5-min poll if Firestore auth not available.
+// ================================================================
 
+let _realtimeController = null; // AbortController for cleanup
+let _realtimeRetryTimer = null;
+let _realtimeActive     = false;
+
+async function startRealtimeListener() {
+  stopRealtimeListener();
+  try {
+    const token = await FS.getToken();
+    if (!token) throw new Error('no token');
+    _realtimeActive = true;
+    listenToTevoSnapshots(token);
+  } catch(e) {
+    // Firestore not ready — fall back to polling
+    console.log('[realtime] Firestore not ready, falling back to 5-min poll');
+    startSnapshotPoll();
+  }
+}
+
+function stopRealtimeListener() {
+  if(_realtimeController) { _realtimeController.abort(); _realtimeController=null; }
+  if(_realtimeRetryTimer)  { clearTimeout(_realtimeRetryTimer); _realtimeRetryTimer=null; }
+  stopSnapshotPoll();
+}
+
+async function listenToTevoSnapshots(token) {
+  // Firestore Listen API — streams document changes via chunked HTTP
+  // Listens to ALL docs in tevo/ collection
+  // Only processes docs for events we're currently tracking
+  const projectId = await FS.getProjectId();
+  if (!projectId) { startSnapshotPoll(); return; }
+
+  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:listen`;
+
+  const body = JSON.stringify({
+    database: `projects/${projectId}/databases/(default)`,
+    addTarget: {
+      query: {
+        parent: `projects/${projectId}/databases/(default)/documents`,
+        structuredQuery: {
+          from: [{collectionId:'tevo'}],
+          orderBy: [{field:{fieldPath:'snapshot_ts'}, direction:'DESCENDING'}],
+          limit: {value: 1} // only latest per query hit — we handle filtering
+        }
+      },
+      targetId: 1
+    }
+  });
+
+  _realtimeController = new AbortController();
+
+  try {
+    const response = await fetch(url, {
+      method:  'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body,
+      signal: _realtimeController.signal
+    });
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    setSt('LIVE ● FIRESTORE STREAMING');
+
+    while(true) {
+      const {done, value} = await reader.read();
+      if(done) break;
+
+      buffer += decoder.decode(value, {stream:true});
+
+      // Firestore streams JSON objects separated by newlines
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // keep incomplete line
+
+      for(const line of lines) {
+        const trimmed = line.trim();
+        if(!trimmed || trimmed === '[' || trimmed === ']' || trimmed === ',') continue;
+        try {
+          const msg = JSON.parse(trimmed.replace(/^,/, ''));
+          handleFirestoreStreamMessage(msg);
+        } catch(e) {}
+      }
+    }
+  } catch(e) {
+    if(e.name === 'AbortError') return; // intentional stop
+    console.log('[realtime] stream ended:', e.message);
+  }
+
+  // Reconnect after brief delay unless intentionally stopped
+  if(_realtimeActive) {
+    _realtimeRetryTimer = setTimeout(async () => {
+      try {
+        const newToken = await FS.getToken();
+        listenToTevoSnapshots(newToken);
+      } catch(e) { startSnapshotPoll(); }
+    }, 3000);
+  }
+}
+
+function handleFirestoreStreamMessage(msg) {
+  // Firestore stream messages have different shapes
+  // documentChange = new/updated doc
+  // targetChange with CURRENT = initial load complete
+  if (!msg.documentChange) return;
+
+  const rawDoc = msg.documentChange.document;
+  if (!rawDoc || !rawDoc.fields) return;
+
+  // Decode the snapshot doc
+  const snap = FS._decodeFields(rawDoc.fields);
+  if (!snap.event_id || !snap.floor) return;
+
+  const eventId = String(snap.event_id);
+
+  // Find the matching tracked event
+  const key = Object.keys(tracked).find(k =>
+    String(tracked[k].event_id) === eventId
+  );
+  if (!key) return; // not a tracked event
+
+  const ev = tracked[key];
+  const newPoint = {
+    ts:     snap.snapshot_ts||new Date().toISOString(),
+    floor:  Math.round(Number(snap.floor||0)),
+    avg:    Math.round(Number(snap.avg||0)),
+    median: Math.round(Number(snap.median||0)),
+    max:    Math.round(Number(snap.max||0)),
+    count:  Math.round(Number(snap.count||0))
+  };
+
+  if(newPoint.floor <= 0 || isNaN(newPoint.floor)) return;
+
+  // Check if we already have this snapshot (dedup by ts)
+  const alreadyHave = (ev.history||[]).some(h => h.ts === newPoint.ts);
+  if(alreadyHave) return;
+
+  // Append new data point
+  if(!ev.history) ev.history = [];
+  ev.history.push(newPoint);
+  ev.history.sort((a,b) => a.ts.localeCompare(b.ts)); // keep chronological
+
+  // Update UI — only re-render what changed
+  renderSidebar();
+  if(selKey === key) {
+    renderDetail(key); // updates price cards + chart
+    setSt(`LIVE UPDATE: ${ev.name} · Floor $${newPoint.floor}`);
+  }
+
+  // Update next-update timer
+  const daysUntilN = ev.date ? Math.max(0,(new Date(ev.date)-new Date())/864e5) : 999;
+  const windowMins = daysUntilN<=2 ? 15 : daysUntilN<=7 ? 30 : 240;
+  const nextTs     = new Date(new Date(newPoint.ts).getTime() + windowMins*60*1000);
+  _nextUpdateMap[eventId] = {
+    next_update_ts:    nextTs.toISOString(),
+    mins_until_update: Math.max(0,Math.round((nextTs-new Date())/60000)),
+    window_mins:       windowMins,
+    last_snapshot_ts:  newPoint.ts
+  };
+
+  updateTotal();
+}
+
+let snapshotPollTimer=null, lastSnapshotTs=null;
 function startSnapshotPoll(){
   stopSnapshotPoll();
   snapshotPollTimer=setInterval(checkForNewSnapshots,5*60*1000);
 }
 function stopSnapshotPoll(){if(snapshotPollTimer){clearInterval(snapshotPollTimer);snapshotPollTimer=null;}}
-
 async function checkForNewSnapshots(){
   try{
     const d=await gasGet({action:'get_settings'});
     if(!d.ok||!d.last_auto_refresh)return;
     if(d.last_auto_refresh===lastSnapshotTs)return;
-    // New auto-refresh detected
     lastSnapshotTs=d.last_auto_refresh;
-    await loadTracked();
+    await loadAllHistories();
     renderSidebar();
     renderF4Portfolio();
-    // Reload intel feed to pick up new brief card
     const intelPanel=document.getElementById('panel-intel');
     if(intelPanel&&intelPanel.style.display!=='none') loadIntelFeed();
-    // Reload rss feed
     const feedPanel=document.getElementById('panel-feed');
     if(feedPanel&&feedPanel.style.display!=='none') loadFeed();
-    // Badge panels that aren't visible
     bumpBadge('intel-badge',1);
     bumpBadge('feed-badge',1);
-    toast('↺ Portfolio auto-refreshed');
+    toast('↺ Portfolio updated');
     setSt(`LAST REFRESH: ${new Date(d.last_auto_refresh).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`);
   }catch(e){}
 }

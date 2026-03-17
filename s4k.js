@@ -1,0 +1,2565 @@
+// ==================================================================
+// MODULE: CORE — State, constants, utilities
+// ==================================================================
+
+
+// ================================================================
+// STATE
+// ================================================================
+const CKEY='s4k_a20', TKEY='s4k_theme_v2'; // Alpha 2.0 — bump to clear old cached settings
+const APP_VERSION='Alpha 2.0'; // single source of truth — update on every release
+// Migrate GAS URL from any previous CKEY version so users don't lose settings on version bump
+(function migrateCreds(){
+  if(localStorage.getItem(CKEY)) return; // already on current version
+  const prev=['s4k_v526','s4k_v5','s4k_v52','s4k_v53'].reverse(); // migrate old GAS URL forward
+  for(const k of prev){
+    const old=localStorage.getItem(k);
+    if(old){ localStorage.setItem(CKEY,old); break; }
+  }
+})();
+let tracked={}, selKey=null, chart=null, cmode='price';
+let son={floor:false,med:true,avg:false,max:false};
+let xFeedItems=[], espnFeedItems=[], feedItems=[], lfilt='all', ifilt=null, sfilt=null;
+// eventFeedMap: eventId → [feed items that affect it] (including affected_event_ids)
+// Built after every loadFeed() — used for sidebar badges, chart markers, event strip
+let eventFeedMap = {}; // { "3082845": [{title, pubDate, impact, srcType, ...}] }
+let intelItems=[], intelTypeFilter='all';
+let chatHistory=[], chatWaiting=false;
+let feedPollTimer=null;
+const chatEventStore={}; // keyed by TEvo event ID, stores full event data for card actions
+
+// ================================================================
+// CORE UTILS
+
+// ==================================================================
+// MODULE: CORE — GAS transport (gasGet, gasPost)
+// ==================================================================
+
+// ================================================================
+function tick(){ document.getElementById('clock').textContent=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}); }
+setInterval(tick,1000); tick();
+
+function toast(msg,type='ok'){ const el=document.getElementById('toast'); el.textContent=msg; el.className=`toast ${type}`; el.style.display='block'; clearTimeout(el._t); el._t=setTimeout(()=>el.style.display='none',3500); }
+function setSt(msg){ document.getElementById('statusmsg').textContent=msg; }
+
+function showPanel(id,el){
+  document.querySelectorAll('.fkey').forEach(f=>f.classList.remove('active'));
+  if(el&&el.classList&&el.classList.contains('fkey')) el.classList.add('active');
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('panel-'+id).classList.add('active');
+  if(id==='feed'){ loadFeed(); startFeedPoll(); renderF4Portfolio(); if(selKey) updateEventFeedStrip(selKey); } else { stopFeedPoll(); }
+  if(id==='feedsrc'){ loadRSSFeeds(); const u=document.getElementById('gas-url-display'); if(u) u.textContent=getCreds().gas||'(save GAS URL in F8 first)'; }
+  if(id==='intel') loadIntelFeed();
+  if(id==='usersettings') loadUserSettings();
+}
+
+// ================================================================
+// CREDENTIALS
+// ================================================================
+function loadCreds(){ try{ const c=JSON.parse(localStorage.getItem(CKEY)||'{}'); document.getElementById('cred-gas').value=c.gas||''; updateSrcBar(c); return c; }catch(e){ return{}; } }
+function getCreds(){ try{ return JSON.parse(localStorage.getItem(CKEY)||'{}'); }catch(e){ return{}; } }
+function saveCreds(){ const c={gas:document.getElementById('cred-gas').value.trim()}; localStorage.setItem(CKEY,JSON.stringify(c)); updateSrcBar(c); toast('SETTINGS SAVED'); }
+function updateSrcBar(c){
+  const st=(id,cls,txt)=>{ const el=document.getElementById(id); if(!el)return; el.textContent=txt; el.className='stag '+cls; };
+  st('tag-gas',  c.gas?'live':'cfg',     c.gas?'LIVE':'NEEDS URL');
+  st('tag-sheets',c.gas?'live':'cfg',    c.gas?'LIVE':'PENDING');
+  st('tag-sg',   c._sgOk?'live':'cfg',   c._sgOk?'LIVE':'NEEDS KEY');
+  st('tag-te',   c._teOk?'live':'cfg',   c._teOk?'LIVE':'NEEDS KEY');
+  st('tag-anth', c._anthOk?'live':'cfg', c._anthOk?'LIVE':'NEEDS KEY');
+  if(c._rssCount>0) st('tag-rss','live',`${c._rssCount} FEED${c._rssCount!==1?'S':''}`);
+  else if(c._rssOk) st('tag-rss','cfg','NO FEEDS YET');
+  else              st('tag-rss','ntk','NEEDS KEY');
+}
+async function gasGet(p){ const c=getCreds(); if(!c.gas) throw new Error('GAS URL not set'); const r=await fetch(`${c.gas}?${new URLSearchParams(p)}`); if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }
+async function gasPost(b){
+  const c=getCreds(); if(!c.gas) throw new Error('GAS URL not set');
+  // text/plain avoids CORS preflight — GAS still receives body via e.postData.contents
+  const r=await fetch(c.gas,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(b)});
+  if(!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+
+// ==================================================================
+// MODULE: FIRESTORE — Direct Firestore reads (FS object)
+// ==================================================================
+
+// ================================================================
+// FirestoreReader — direct terminal → Firestore reads
+// ================================================================
+// Writes always go through GAS (keeps TEvo/Anthropic auth centralized).
+// Reads go direct: Terminal → Firestore REST API (sub-second, no GAS hop).
+//
+// Token lifecycle:
+//   First call → fetch token from GAS get_firebase_token
+//   Subsequent calls → use cached token
+//   Token expires → auto-refresh (55min cache, 60min actual)
+//
+// Usage:
+//   const snaps = await FS.getEventSnapshots('3082845', 50);
+//   const items = await FS.getFeedItems({league:'NBA', limit:100});
+//   const doc   = await FS.getDoc('event_index', '3082845');
+// ================================================================
+const FS = (() => {
+  let _token      = null;
+  let _projectId  = null;
+  let _expiresAt  = 0;
+
+  // ── Token management ───────────────────────────────────────────
+  async function getToken() {
+    if (_token && Date.now() < _expiresAt - 60000) return _token;
+    const d = await gasGet({action:'get_firebase_token'});
+    if (!d.ok) throw new Error(`Firebase token error: ${d.error}`);
+    _token     = d.token;
+    _projectId = d.project_id;
+    _expiresAt = new Date(d.expires_at).getTime();
+    return _token;
+  }
+
+  function baseUrl() {
+    return `https://firestore.googleapis.com/v1/projects/${_projectId}/databases/(default)/documents`;
+  }
+
+  // ── Raw Firestore value decoder ────────────────────────────────
+  function decodeValue(v) {
+    if (!v) return null;
+    if (v.stringValue  !== undefined) return v.stringValue;
+    if (v.integerValue !== undefined) return Number(v.integerValue);
+    if (v.doubleValue  !== undefined) return Number(v.doubleValue);
+    if (v.booleanValue !== undefined) return v.booleanValue;
+    if (v.nullValue    !== undefined) return null;
+    if (v.timestampValue !== undefined) return v.timestampValue;
+    if (v.arrayValue)  return (v.arrayValue.values||[]).map(decodeValue);
+    if (v.mapValue)    return decodeFields(v.mapValue.fields||{});
+    return null;
+  }
+
+  function decodeFields(fields) {
+    const out = {};
+    Object.entries(fields||{}).forEach(([k,v]) => { out[k] = decodeValue(v); });
+    return out;
+  }
+
+  function decodeDoc(raw) {
+    if (!raw || !raw.fields) return null;
+    const doc = decodeFields(raw.fields);
+    // Add Firestore doc ID as _id
+    if (raw.name) doc._id = raw.name.split('/').pop();
+    return doc;
+  }
+
+  // ── GET single document ────────────────────────────────────────
+  async function getDoc(collection, docId) {
+    const token = await getToken();
+    const url   = `${baseUrl()}/${collection}/${encodeURIComponent(docId)}`;
+    const r = await fetch(url, {headers:{Authorization:`Bearer ${token}`}});
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error(`Firestore GET ${collection}/${docId}: HTTP ${r.status}`);
+    return decodeDoc(await r.json());
+  }
+
+  // ── Structured query (POST :runQuery) ──────────────────────────
+  // filters: [{field, op, value}]  op = EQUAL | GREATER_THAN | LESS_THAN | etc.
+  // orderBy: [{field, dir}]        dir = ASCENDING | DESCENDING
+  async function query(collection, filters=[], orderBy=[], limit=100) {
+    const token = await getToken();
+    const url   = `${baseUrl()}:runQuery`;
+
+    const where = filters.length === 1
+      ? buildFilter(filters[0])
+      : {compositeFilter:{op:'AND', filters: filters.map(buildFilter)}};
+
+    const structuredQuery = {
+      from:  [{collectionId: collection}],
+      limit: {value: limit},
+    };
+    if (filters.length) structuredQuery.where  = where;
+    if (orderBy.length) structuredQuery.orderBy = orderBy.map(o=>({
+      field:{fieldPath:o.field}, direction:o.dir||'DESCENDING'
+    }));
+
+    const r = await fetch(url, {
+      method:  'POST',
+      headers: {Authorization:`Bearer ${token}`, 'Content-Type':'application/json'},
+      body:    JSON.stringify({structuredQuery})
+    });
+    if (!r.ok) throw new Error(`Firestore query ${collection}: HTTP ${r.status}`);
+    const results = await r.json();
+    return (Array.isArray(results) ? results : [results])
+      .filter(row => row.document)
+      .map(row => decodeDoc(row.document));
+  }
+
+  function buildFilter({field, op, value}) {
+    let fv;
+    if      (typeof value === 'string')  fv = {stringValue:  value};
+    else if (typeof value === 'number')  fv = {doubleValue:  value};
+    else if (typeof value === 'boolean') fv = {booleanValue: value};
+    else                                 fv = {nullValue:    'NULL_VALUE'};
+    return {fieldFilter:{field:{fieldPath:field}, op, value:fv}};
+  }
+
+  // ── Convenience methods ────────────────────────────────────────
+
+  // Latest N price snapshots for an event from tevo/ collection
+  async function getEventSnapshots(eventId, limit=100) {
+    return query('tevo',
+      [{field:'event_id', op:'EQUAL', value:String(eventId)}],
+      [{field:'snapshot_ts', dir:'DESCENDING'}],
+      limit
+    );
+  }
+
+  // Feed items from feed_items/ — filter by league, matched, or event
+  async function getFeedItems({league, matched, eventId, limit=150} = {}) {
+    const filters = [];
+    if (eventId) filters.push({field:'matched_event_id', op:'EQUAL', value:String(eventId)});
+    else if (matched) filters.push({field:'matched', op:'EQUAL', value:true});
+    else if (league && league !== 'all') filters.push({field:'league', op:'EQUAL', value:league});
+    return query('feed_items', filters, [{field:'received_ts', dir:'DESCENDING'}], limit);
+  }
+
+  // Event index doc — latest prices across all sources for one event
+  async function getEventIndex(eventId) {
+    return getDoc('event_index', String(eventId));
+  }
+
+  // ESPN feed items — filter by league, matched, or directly by event
+  async function getEspnItems({league, eventId, limit=100} = {}) {
+    const filters = [];
+    if (eventId) {
+      // Direct event match (populated by EspnPoller.gs performer matching)
+      filters.push({field:'matched_event_id', op:'EQUAL', value:String(eventId)});
+    } else if (league && league !== 'all') {
+      filters.push({field:'feed_league', op:'EQUAL', value:league});
+      filters.push({field:'matched', op:'EQUAL', value:true});
+    } else {
+      filters.push({field:'matched', op:'EQUAL', value:true});
+    }
+    return query('espn_feed', filters, [{field:'received_ts', dir:'DESCENDING'}], limit);
+  }
+
+  // Connection test — reads the ping doc
+  async function testConnection() {
+    try {
+      const doc = await getDoc('_connection_test', 'ping');
+      return {ok: !!doc, doc};
+    } catch(e) {
+      return {ok: false, error: e.message};
+    }
+  }
+
+  return {getDoc, query, getEventSnapshots, getFeedItems,
+          getEventIndex, getEspnItems, testConnection, getToken,
+          getProjectId: async () => { await getToken(); return _projectId; },
+          _decodeFields: decodeFields};
+})();
+
+// ==================================================================
+// MODULE: CORE — Connection tests, date utils, formatting
+// ==================================================================
+
+async function testConn(){
+  const box=document.getElementById('conn-box'); box.style.display='block'; box.className='connbox'; box.textContent='TESTING...';
+  try{
+    const url=document.getElementById('cred-gas').value.trim();
+    if(!url){ box.textContent='ENTER URL FIRST'; box.className='connbox err'; return; }
+    const d=await(await fetch(`${url}?action=ping`)).json();
+    if(d.ok){
+      box.textContent=`CONNECTED · SG:${d.sg?'OK':'NO KEY'} · TE:${d.te?'OK':'NO KEY'} · AI:${d.anthropic?'OK':'NO KEY'} · RSS:${d.rss?'OK':'NO KEY'}`;
+      box.className='connbox ok';
+      const c=getCreds(); c._sgOk=d.sg; c._teOk=d.te; c._anthOk=d.anthropic; c._rssOk=d.rss;
+      localStorage.setItem(CKEY,JSON.stringify(c)); updateSrcBar(c);
+    } else { box.textContent=`ERROR: ${d.error}`; box.className='connbox err'; }
+  }catch(e){ box.textContent=`FAILED: ${e.message}`; box.className='connbox err'; }
+}
+
+async function testFirestore(){
+  const box=document.getElementById('fs-test-box');
+  box.style.display='block'; box.className='connbox'; box.textContent='TESTING FIRESTORE CONNECTION...';
+  try {
+    const result = await FS.testConnection();
+    if(result.ok) {
+      // Also count a few collections
+      const snaps = await FS.query('tevo',[],[{field:'snapshot_ts',dir:'DESCENDING'}],5);
+      const feeds = await FS.query('feed_items',[],[{field:'received_ts',dir:'DESCENDING'}],5);
+      box.textContent = `FIRESTORE CONNECTED ✓ · tevo/ (${snaps.length} recent) · feed_items/ (${feeds.length} recent)`;
+      box.className='connbox ok';
+    } else {
+      box.textContent = `FIRESTORE FAILED: ${result.error}`;
+      box.className='connbox err';
+    }
+  } catch(e) {
+    box.textContent = `FIRESTORE ERROR: ${e.message}`;
+    box.className='connbox err';
+  }
+}
+
+// ================================================================
+// HELPERS
+// ================================================================
+function calcStats(p){ if(!p.length)return{floor:0,max:0,avg:0,median:0,count:0};const s=[...p].sort((a,b)=>a-b);const sum=s.reduce((a,b)=>a+b,0);const mid=Math.floor(s.length/2);return{floor:s[0],max:s[s.length-1],avg:Math.round(sum/s.length),median:s.length%2===0?Math.round((s[mid-1]+s[mid])/2):s[mid],count:s.length}; }
+function daysUntil(d){ if(!d)return null; const dt=new Date(d); if(isNaN(dt))return null; return Math.max(0,Math.round((dt-new Date())/864e5)); }
+
+// Safe date formatter — handles ISO strings, GAS Date serializations,
+// spreadsheet serial numbers, and anything else without throwing
+function safeDate(d, opts){
+  if(!d || d==='' || d==='0' || d===false) return 'TBD';
+  let dt;
+  // Try direct ISO parse first (most TEvo dates: "2026-03-25T20:00:00Z")
+  dt = new Date(d);
+  if(!isNaN(dt.getTime()) && dt.getFullYear() > 2000)
+    return dt.toLocaleDateString('en-US', opts||{weekday:'short',month:'short',day:'numeric',year:'numeric'});
+  // Sheets serial number (days since Dec 30 1899) — 2026 dates ≈ 46000
+  const n = Number(d);
+  if(!isNaN(n) && n > 40000 && n < 70000) {
+    dt = new Date(Date.UTC(1899,11,30) + n*86400000);
+    if(!isNaN(dt.getTime()))
+      return dt.toLocaleDateString('en-US', opts||{weekday:'short',month:'short',day:'numeric',year:'numeric'});
+  }
+  // Strip GAS timezone suffix e.g. "Mon Mar 25 2026 ... (Coordinated Universal Time)"
+  dt = new Date(String(d).replace(/\s*\(.*\)$/, '').trim());
+  if(!isNaN(dt.getTime()) && dt.getFullYear() > 2000)
+    return dt.toLocaleDateString('en-US', opts||{weekday:'short',month:'short',day:'numeric',year:'numeric'});
+  return 'TBD';
+}
+
+function safeDateFull(d){
+  return safeDate(d, {weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+function dayOfWeek(d){ if(!d)return''; return['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(d).getDay()]; }
+function fmt(n){ return n>=1000?'$'+Number(n).toLocaleString():'$'+n; }
+function fmtC(n){ return Number(n).toLocaleString(); }
+function dHtml(n,isC){ if(!n||n===0)return'<span style="color:var(--muted)">—</span>'; const a=Math.abs(n),s=isC?a.toLocaleString():'$'+a.toLocaleString(); return n>0?`<span class="dup">▲ ${s}</span>`:`<span class="ddn">▼ ${s}</span>`; }
+function skey(src,v,p,eid){
+  // TEvo events: key by event_id only — guaranteed unique, prevents venue/performer string variance duplicates
+  if(src==='TE'&&eid) return `TE::${eid}`;
+  // SeatGeek: keep venue+performer+id composite key
+  return`${src}::${(v||'').replace(/[^\w]/g,'_').substring(0,30)}::${(p||'').replace(/[^\w]/g,'_').substring(0,30)}::${eid||''}`.replace(/::$/,'');
+}
+function ago(ds){ const d=new Date(ds),m=Math.round((Date.now()-d)/60000); if(m<1)return'just now'; if(m<60)return`${m}m ago`; if(m<1440)return`${Math.round(m/60)}h ago`; return`${Math.round(m/1440)}d ago`; }
+
+// Next-update timers — loaded from GAS get_settings
+let _nextUpdateMap = {}; // event_id → {mins_until_update, window_mins, next_update_ts}
+
+async function loadNextUpdateTimes(){
+  try {
+    // Try Firestore event_index first — has last snapshot ts per event
+    const keys = Object.keys(tracked);
+    if (!keys.length) return;
+    for (const key of keys) {
+      const ev = tracked[key];
+      if (!ev || !ev.event_id) continue;
+      try {
+        const idx = await FS.getEventIndex(ev.event_id);
+        if (idx && idx.tevo_ts) {
+          const daysUntilN = ev.date
+            ? Math.max(0, (new Date(ev.date)-new Date())/864e5) : 999;
+          const windowMins = daysUntilN<=2 ? 15 : daysUntilN<=7 ? 30 : 240;
+          const nextTs     = new Date(new Date(idx.tevo_ts).getTime() + windowMins*60*1000);
+          const minsUntil  = Math.max(0, Math.round((nextTs-new Date())/60000));
+          _nextUpdateMap[String(ev.event_id)] = {
+            next_update_ts:    nextTs.toISOString(),
+            mins_until_update: minsUntil,
+            window_mins:       windowMins,
+            last_snapshot_ts:  idx.tevo_ts
+          };
+        }
+      } catch(e) {} // per-event failure is non-fatal
+    }
+    renderSidebar();
+  } catch(e) {
+    // Fall back to GAS get_settings
+    try {
+      const d = await gasGet({action:'get_settings'});
+      if(d.ok && d.event_next_update) {
+        _nextUpdateMap = d.event_next_update;
+        renderSidebar();
+      }
+    } catch(e2) {}
+  }
+}
+
+function getNextUpdateLabel(eventId){
+  const info = _nextUpdateMap[String(eventId)];
+  if(!info) return '';
+  const mins = info.mins_until_update;
+  if(mins<=0)  return '<span style="color:var(--green);font-size:9px;">UPDATE DUE</span>';
+  if(mins< 60) return `<span style="color:var(--muted);font-size:9px;">↻ ${mins}m</span>`;
+  return `<span style="color:var(--muted);font-size:9px;">↻ ${Math.round(mins/60)}h</span>`;
+}
+
+// ==================================================================
+// MODULE: PORTFOLIO — Tracked events, history, sidebar
+// ==================================================================
+
+async function loadTracked(){
+  setSt('LOADING...');
+  try{
+    // ── Show cached data immediately if available ─────────────────
+    // sessionStorage survives page refresh but not tab close.
+    // Lets the sidebar render in ~0ms while fresh data loads in background.
+    const CACHE_KEY = 's4k_tracked_cache';
+    const cached = sessionStorage.getItem(CACHE_KEY);
+    if(cached){
+      try{
+        const cachedEvents = JSON.parse(cached);
+        tracked={};
+        cachedEvents.forEach(ev=>{
+          const key = ev.src==='TE'&&ev.event_id ? `TE::${ev.event_id}` : ev.key;
+          tracked[key]={...ev, key, history:[]};
+        });
+        renderSidebar(); updateTotal(); setSt('UPDATING...');
+      }catch(e){}
+    }
+
+    // ── Fetch fresh data from GAS ─────────────────────────────────
+    const d=await gasGet({action:'tracked'});
+    tracked={};
+    (d.events||[]).forEach(ev=>{
+      const canonicalKey = ev.src==='TE'&&ev.event_id ? `TE::${ev.event_id}` : ev.key;
+      const alreadyHas = ev.src==='TE' && Object.values(tracked).some(t=>String(t.event_id)===String(ev.event_id));
+      if(!alreadyHas) tracked[canonicalKey]={...ev, key:canonicalKey, history:[]};
+    });
+
+    // Cache the event list (without history) for next load
+    try{
+      sessionStorage.setItem(CACHE_KEY, JSON.stringify(
+        Object.values(tracked).map(({history:_, ...ev})=>ev)
+      ));
+    }catch(e){}
+
+    // Render sidebar immediately with event names — don't wait for price data
+    renderSidebar(); updateTotal(); setSt('LOADING PRICES...');
+
+    // Pre-fetch Firebase token once — avoids N simultaneous token requests
+    try { await FS.getToken(); } catch(e) {}
+
+    // Load all histories in parallel — each updates sidebar as it arrives
+    loadAllHistories().then(() => {
+      renderSidebar(); updateTotal(); setSt('READY');
+      startRealtimeListener();
+      // Auto-select first event so chart shows on open without needing a click
+      if(!selKey) {
+        const firstKey = Object.keys(tracked)[0];
+        if(firstKey) selectEvent(firstKey);
+      }
+    }).catch(() => setSt('READY'));
+
+  }catch(e){ setSt('ADD GAS URL IN F8'); }
+}
+
+// Load histories for all tracked events in parallel.
+// Each event updates the sidebar incrementally as its data arrives.
+async function loadAllHistories(){
+  const keys = Object.keys(tracked);
+  if(!keys.length) return;
+  await Promise.allSettled(
+    keys.map(async k => {
+      await loadHistory(k);
+      renderSidebar(); // update this event's card as soon as its data lands
+    })
+  );
+}
+async function loadHistory(key){
+  const ev=tracked[key]; if(!ev) return;
+  let loaded = false;
+
+  // ── Try Firestore ─────────────────────────────────────────────
+  // Requires composite index: tevo/ → event_id ASC, snapshot_ts DESC
+  // If index missing: Firestore returns HTTP 400 → falls through to GAS.
+  // Create index: Firebase Console → Firestore → Indexes → Composite
+  //   Collection: tevo | event_id ASC | snapshot_ts DESC
+  try {
+    const snaps = await FS.getEventSnapshots(ev.event_id, 1000);
+    if(snaps && snaps.length > 0){
+      ev.history = snaps
+        .map(s=>({
+          ts:     s.snapshot_ts||'',
+          floor:  Math.round(Number(s.floor||0)),
+          avg:    Math.round(Number(s.avg||0)),
+          median: Math.round(Number(s.median||0)),
+          max:    Math.round(Number(s.max||0)),
+          count:  Math.round(Number(s.count||0))
+        }))
+        .filter(s=>s.floor>0 && s.avg>0 && !isNaN(s.floor))
+        .map(s=>({...s, max: s.max > s.floor*20 ? s.avg*3 : s.max}))
+        .sort((a,b)=>a.ts.localeCompare(b.ts));
+      loaded = true;
+    }
+  } catch(fsErr) {}
+
+  // ── GAS fallback — reads all rows from Sheets ─────────────────
+  if(!loaded){
+    try {
+      const d = await gasGet({action:'history', src:ev.src||'TE', event_id:ev.event_id});
+      ev.history = (d.rows||[])
+        .map(r=>({
+          ts:     String(r.snapshot_ts||''),
+          floor:  Math.round(Number(r.floor||0)),
+          avg:    Math.round(Number(r.avg||0)),
+          median: Math.round(Number(r.median||0)),
+          max:    Math.round(Number(r.max||0)),
+          count:  Math.round(Number(r.count||0))
+        }))
+        .filter(s=>s.floor>0 && s.avg>0 && !isNaN(s.floor))
+        .map(s=>({...s, max: s.max > s.floor*20 ? s.avg*3 : s.max}))
+        .sort((a,b)=>a.ts.localeCompare(b.ts));
+    } catch(gasErr){ ev.history=[]; }
+  }
+
+  // Re-render chart immediately if this is the selected event
+  if(selKey===key && (ev.history||[]).length>0) renderDetail(key);
+}
+
+async function saveSnap(src,venue,perf,eid,name,date,stats,dataSource){
+  const key = src==='TE' ? `TE::${eid}` : skey(src,venue,perf,eid);
+  const ev=tracked[key]||{key,src,event_id:eid,name,venue,performer:perf,date,added_at:new Date().toISOString(),history:[]};
+  const prev=ev.history.length?ev.history[ev.history.length-1]:null;
+  const du=daysUntil(date);
+  // Round all prices — never write decimals to snapshot
+  const floor=Math.round(stats.floor||0), avg=Math.round(stats.avg||0),
+        median=Math.round(stats.median||0), max=Math.round(stats.max||0),
+        count=Math.round(stats.count||0);
+  const snap={
+    source:src, event_id:eid, event_name:name, venue, performer:perf,
+    sport_type:'', event_date:date,
+    days_until_event:String(Math.max(0,du)), day_of_week_event:dayOfWeek(date),
+    floor, avg, median, max, count,
+    floor_delta:prev?floor-Math.round(prev.floor||0):0,
+    avg_delta:prev?avg-Math.round(prev.avg||0):0,
+    median_delta:prev?median-Math.round(prev.median||0):0,
+    count_delta:prev?count-Math.round(prev.count||0):0,
+    days_until_delta:0, price_buckets:{},
+    data_source:dataSource||'listings'
+  };
+  try{ await gasPost({action:'snapshot',src,snapshot:snap}); }
+  catch(e){ toast('SHEETS WRITE FAILED','err'); }
+  ev.history.push({ts:new Date().toISOString(),floor,avg,median,max,count});
+  ev.lastUpdate=new Date().toISOString();
+  tracked[key]=ev; renderSidebar(); updateTotal(); return key;
+}
+function renderSidebar(){
+  const el=document.getElementById('sbl'); const keys=Object.keys(tracked);
+  document.getElementById('tcount').textContent=keys.length;
+  if(!keys.length){ el.innerHTML='<div style="padding:12px;color:var(--muted);font-size:10px;">NO EVENTS TRACKED<br><br>USE F3 OR CHAT TO ADD</div>'; return; }
+  el.innerHTML=keys.map(k=>{
+    const r=tracked[k]; 
+    // Filter bad snapshots — floor must be > 0 and not NaN
+    const h=(r.history||[]).filter(s=>s.floor>0&&!isNaN(s.floor)&&s.avg>0&&!isNaN(s.avg));
+    if(!h.length) return`<div class="er src-${r.src.toLowerCase()}${k===selKey?' active':''}" onclick="selectEvent('${k}')"><div style="display:flex;justify-content:space-between;"><div class="er-name">${r.name}</div><span class="spill ${r.src.toLowerCase()}">${r.src}</span></div><div class="er-meta">${(r.venue||'').replace(/_/g,' ').substring(0,26)}</div><div class="er-r2"><span style="color:var(--muted);font-size:10px;">LOADING...</span></div></div>`;
+    const lat=h[h.length-1],prev=h.length>1?h[h.length-2]:null,fd=prev?lat.floor-prev.floor:0;
+    const nextUpd = getNextUpdateLabel(r.event_id||'');
+    // News badge — how many feed items affect this event in last 24h
+    const evNews  = (eventFeedMap[String(r.event_id||'')] || []);
+    const recentNews = evNews.filter(i => (Date.now()-new Date(i.pubDate||0).getTime()) < 24*3600*1000);
+    const highNews   = recentNews.filter(i => i.impact==='High');
+    const newsBadge  = recentNews.length > 0
+      ? `<span style="font-size:9px;padding:0 4px;border-radius:2px;margin-left:4px;background:${highNews.length?'rgba(255,23,68,0.2)':'rgba(251,188,4,0.15)'};color:${highNews.length?'var(--red)':'var(--amber)'};" title="${recentNews.length} news items">${highNews.length?'●':'○'} ${recentNews.length}</span>`
+      : '';
+    return`<div class="er src-${r.src.toLowerCase()}${k===selKey?' active':''}" onclick="selectEvent('${k}')"><div style="display:flex;justify-content:space-between;align-items:flex-start;"><div class="er-name" title="${r.name}">${r.name}</div><span class="spill ${r.src.toLowerCase()}">${r.src}</span></div><div class="er-meta">${(r.venue||'').replace(/_/g,' ').substring(0,26)}</div><div class="er-r2"><span class="er-floor">${fmt(lat.floor)}</span><span style="font-size:10px;">${dHtml(fd,false)}</span><span class="sct">${h.length}×</span><span class="elst"><span>${fmtC(lat.count)}</span> LST</span>${nextUpd}${newsBadge}</div></div>`;
+  }).join('');
+}
+async function selectEvent(key){
+  selKey = key;
+  renderSidebar();
+  showPanel('detail', document.querySelectorAll('.fkey')[0]);
+
+  const ev = tracked[key];
+  if (!ev) return;
+
+  // If we already have history, render immediately — don't make user wait
+  if (ev.history && ev.history.length > 0) {
+    renderDetail(key);
+  } else {
+    // No history yet — show loading state on price cards
+    setSt(`Loading ${ev.name}...`);
+    ['m-f','m-a','m-m','m-x','m-c'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = '…';
+    });
+  }
+
+  // Update event feed strip immediately (uses in-memory data, instant)
+  updateEventFeedStrip(key);
+
+  // Load history and markers in parallel — non-blocking
+  const [_hist] = await Promise.allSettled([
+    loadHistory(key),
+    loadEventFeedMarkers(key)
+  ]);
+
+  // Render with full data once both complete
+  if (selKey === key) {
+    renderDetail(key);
+    renderChart(tracked[key]);
+    setSt('READY');
+  }
+}
+// ── Feed markers per event ────────────────────────────────────────
+// Loads matched feed items for a tracked event from Firestore.
+// Sources: feed_items/ (X/Twitter via attribution) + espn_feed/ (ESPN RSS).
+// Stored in ev.feedMarkers — used by renderChart for triangle overlays.
+//
+// X feed items:  query by matched_event_id (set by TeamLinking attribution)
+// ESPN items:    query by feed_league + performer name in title/description
+//                (attribution stored at write time when possible)
+//
+// Color coding:
+//   Red    = High impact (injury, trade, star out)
+//   Amber  = Medium impact (lineup change, questionable)
+//   Green  = Low impact / informational
+//   Cyan   = ESPN sourced
+
+// ==================================================================
+// MODULE: CHART — Feed markers, price chart rendering
+// ==================================================================
+
+async function loadEventFeedMarkers(key) {
+  const ev = tracked[key];
+  if (!ev || !ev.event_id) return;
+
+  const markers = [];
+  const eventId = String(ev.event_id);
+
+  // Helper: convert feed item to marker
+  function toMarker(item, sourceType) {
+    const impact   = item.impact || item.attr_category || 'Low';
+    const color    = impact==='High'   ? '#FF1744'
+                   : impact==='Medium' ? '#FFB300'
+                   : sourceType==='espn' ? '#00E5FF'
+                   : '#00E676';
+    const ts = item.received_ts || item.posted_at || item.pubDate || '';
+    if (!ts) return null;
+    return {
+      ts,
+      title:   item.post_text || item.title || '',
+      source:  item.author_handle || item.author_name || item.feed_name || item.creator || '',
+      league:  item.league || item.feed_league || '',
+      impact,
+      color,
+      sourceType,
+      keywords: item.attr_keywords || item.keywords_hit || []
+    };
+  }
+
+  try {
+    // Primary: use eventFeedMap if already built (instant — no Firestore call needed)
+    const mapItems = eventFeedMap[String(eventId)] || [];
+    if(mapItems.length > 0) {
+      mapItems.forEach(item => {
+        const m = toMarker(item, item.srcType||'x');
+        if(m) markers.push(m);
+      });
+    } else {
+      // Fallback: query Firestore directly
+      const xItems = await FS.getFeedItems({eventId, limit:200});
+      xItems.forEach(item => { const m=toMarker(item,'x'); if(m) markers.push(m); });
+    }
+
+    // ESPN — try direct match first, then league+text
+    const evLeague    = ev.league || inferLeague(ev);
+    const performerLc = (ev.performer||'').toLowerCase();
+    const nameParts   = performerLc.split(/\s+/).filter(w => w.length >= 4);
+
+    let espnItems = [];
+    // Try direct event match first
+    const espnDirect = await FS.getEspnItems({eventId, limit:100});
+    if (espnDirect.length > 0) {
+      espnItems = espnDirect;
+    } else if (evLeague) {
+      // Fall back to league filter + text match
+      const espnByLeague = await FS.getEspnItems({league: evLeague, limit:300});
+      espnItems = espnByLeague.filter(item => {
+        const text = ((item.title||'') + ' ' + (item.description||'')).toLowerCase();
+        return nameParts.length === 0 || nameParts.some(p => text.includes(p));
+      });
+    }
+
+    espnItems.forEach(item => {
+      const m = toMarker(item, 'espn');
+      if (m) markers.push(m);
+    });
+
+    // Deduplicate by ts+title
+    const seen = new Set();
+    const deduped = markers.filter(m => {
+      const k = m.ts + m.title.substring(0,30);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+
+    // Sort chronologically
+    deduped.sort((a,b) => a.ts.localeCompare(b.ts));
+    ev.feedMarkers = deduped;
+
+    if (deduped.length > 0) {
+      Logger && Logger.log(`[feedMarkers] ${key}: ${deduped.length} markers (${xItems.length} X + ${markers.length - xItems.length} ESPN)`);
+    }
+
+  } catch(e) {
+    // Firestore not available — fall back to in-memory feedItems text match
+    ev.feedMarkers = buildFallbackMarkers(ev);
+  }
+}
+
+// Infer league from event performer/name for ESPN matching
+function inferLeague(ev) {
+  const text = ((ev.performer||'') + ' ' + (ev.name||'')).toLowerCase();
+  if (/lakers|celtics|knicks|warriors|heat|bucks|76ers|nets|bulls|cavs|nuggets|suns|clippers|pacers|raptors|grizzlies|magic|thunder|jazz|pelicans|spurs|kings|blazers|pistons|hornets|wizards|timberwolves|rockets|mavericks|hawks/.test(text)) return 'NBA';
+  if (/chiefs|eagles|cowboys|patriots|49ers|rams|ravens|bills|bengals|packers|steelers|chargers|raiders|broncos|lions|bears|vikings|saints|giants|jets|commanders|falcons|seahawks|buccaneers|titans|colts|jaguars|texans|dolphins|cardinals/.test(text)) return 'NFL';
+  if (/yankees|dodgers|red sox|cubs|astros|braves|mets|cardinals|phillies|padres|giants|brewers|mariners|rangers|angels|orioles|guardians|twins|royals|athletics|tigers|reds|pirates|nationals|marlins|rockies|diamondbacks|blue jays|rays|white sox/.test(text)) return 'MLB';
+  if (/rangers|bruins|lightning|maple leafs|penguins|capitals|hurricanes|golden knights|avalanche|oilers|flames|canucks|kings|ducks|sharks|blackhawks|red wings|flyers|blues|stars|predators|jets|canadiens|senators|sabres|islanders|devils|wild|kraken/.test(text)) return 'NHL';
+  return '';
+}
+
+// Fallback when Firestore unavailable — use in-memory feedItems text match
+function buildFallbackMarkers(ev) {
+  if (!feedItems || !feedItems.length) return [];
+  const terms = [(ev.name||''),(ev.performer||'')]
+    .flatMap(s => s.toLowerCase().split(/\s+at\s+|\s+vs\.?\s+|\s+@\s+/))
+    .map(s => s.replace(/[^\w\s]/g,'').trim())
+    .filter(s => s.length >= 4);
+  return feedItems
+    .filter(item => {
+      const text = (item.title||'').toLowerCase();
+      return terms.some(t => text.includes(t)) && (item.pubDate||'');
+    })
+    .map(item => ({
+      ts:     item.pubDate||'',
+      title:  item.title||'',
+      source: item.source||item.handle||'',
+      league: item.league||'',
+      impact: item.impact||'Low',
+      color:  item.impact==='High'?'#FF1744':item.impact==='Medium'?'#FFB300':'#00E676',
+      sourceType: 'x'
+    }));
+}
+
+
+  const r=tracked[key]; if(!r)return;
+  const h=r.history||[],isSG=r.src==='SG',lat=h.length?h[h.length-1]:null,prev=h.length>1?h[h.length-2]:null;
+  document.getElementById('det-banner').className=`banner ${isSG?'sg':'te'}`;
+  document.getElementById('det-bdot').style.background=isSG?'var(--sg)':'var(--te)';
+  const lbl=document.getElementById('det-blbl'); lbl.textContent=isSG?'SEATGEEK':'TICKET EVOLUTION'; lbl.className=`blbl ${isSG?'sg':'te'}`;
+  document.getElementById('det-bmeta').textContent=isSG?'Listings API v2 · via GAS':'Listings v9 · HMAC via GAS';
+  document.getElementById('det-title').textContent=r.name;
+  document.getElementById('det-meta').textContent=`${(r.venue||'').replace(/_/g,' ')} · ${(r.performer||'').replace(/_/g,' ')}${r.date?' · '+safeDate(r.date):''}`;
+  const pill=document.getElementById('lst-pill'),pd=document.getElementById('lst-delta');
+  if(lat){
+    pill.style.display='inline-block'; pill.textContent=`${fmtC(lat.count)} LST`;
+    pill.style.borderColor=isSG?'var(--sg)':'var(--te)'; pill.style.color=isSG?'var(--sg)':'var(--te)';
+    if(prev){pd.style.display='inline-block';pd.innerHTML=dHtml(lat.count-prev.count,true);}else pd.style.display='none';
+    const sv=(id,v,d)=>{ document.getElementById(id).textContent=v; document.getElementById(id+'d').innerHTML=d; };
+    sv('m-f',fmt(lat.floor),prev?dHtml(lat.floor-prev.floor,false):'<span style="color:var(--muted)">FIRST</span>');
+    sv('m-a',fmt(lat.avg),  prev?dHtml(lat.avg-prev.avg,false):'<span style="color:var(--muted)">—</span>');
+    sv('m-m',fmt(lat.median),prev?dHtml(lat.median-prev.median,false):'<span style="color:var(--muted)">—</span>');
+    sv('m-x',fmt(lat.max),  prev?dHtml(lat.max-prev.max,false):'<span style="color:var(--muted)">—</span>');
+    sv('m-c',fmtC(lat.count),prev?dHtml(lat.count-prev.count,true):'<span style="color:var(--muted)">FIRST</span>');
+  }
+  document.getElementById('btn-ref').disabled=false; document.getElementById('btn-rem').disabled=false;
+  const si=document.getElementById('snapinfo'); si.style.display='flex';
+  document.getElementById('snap-l').textContent=`${h.length} SNAPSHOT${h.length!==1?'S':''}`;
+  const lastTs=h.length?h[h.length-1].ts:r.lastUpdate;
+  const minsAgo=lastTs?Math.round((Date.now()-new Date(lastTs))/60000):null;
+  const agoStr=minsAgo===null?'—':minsAgo<2?'just now':minsAgo<60?`${minsAgo}m ago`:minsAgo<1440?`${Math.round(minsAgo/60)}h ago`:`${Math.round(minsAgo/1440)}d ago`;
+  document.getElementById('snap-r').textContent=lastTs?`LISTINGS UPDATED: ${agoStr}`:'—';
+  renderChart(r);
+}
+
+// ==================================================================
+// MODULE: CHART — Chart controls (togS, switchMode)
+// ==================================================================
+
+function togS(s,el){ son[s]=!son[s]; const cls={floor:'of',med:'om',avg:'oa',max:'ox'}; son[s]?el.classList.add(cls[s]):el.classList.remove(cls[s]); if(selKey&&cmode==='price')renderChart(tracked[selKey]); const a=Object.keys(son).filter(k=>son[k]).map(k=>k.toUpperCase()); document.getElementById('clbl').textContent=a.length?a.join(' · ')+' — PER SNAPSHOT':'(SELECT A SERIES)'; }
+function switchMode(mode,el){ cmode=mode; document.querySelectorAll('.ctab').forEach(t=>t.classList.remove('active')); el.classList.add('active'); document.getElementById('stgl').style.display=mode==='price'?'flex':'none'; document.getElementById('clbl').textContent=mode==='price'?(Object.keys(son).filter(k=>son[k]).map(k=>k.toUpperCase()).join(' · ')||'(SELECT)')+' — PER SNAPSHOT':'LISTING COUNT — PER SNAPSHOT'; if(selKey)renderChart(tracked[selKey]); }
+function renderChart(r){
+  const canvas=document.getElementById('main-ch'),empty=document.getElementById('empty-ch');
+  const h=(r.history||[]).filter(s=>s.floor>0&&!isNaN(s.floor));
+  if(!h.length){
+    canvas.style.display='none';
+    empty.style.display='flex';
+    // Show diagnostic — why is there no data?
+    const snapCount = (r.history||[]).length;
+    const badSnaps  = (r.history||[]).filter(s=>!(s.floor>0)).length;
+    const msg = snapCount===0
+      ? 'NO SNAPSHOTS YET — GAS trigger will write data every 5-15 min'
+      : `${snapCount} SNAPSHOT${snapCount!==1?'S':''} FILTERED — floor must be > $0 (${badSnaps} invalid)`;
+    const msgEl = empty.querySelector('span:nth-child(3)');
+    if(msgEl) msgEl.textContent = msg;
+    return;
+  }
+  // Single data point — show as large dot instead of line
+  const singlePoint = h.length === 1;
+  canvas.style.display='block';empty.style.display='none';
+  const labels=h.map(s=>{const d=new Date(s.ts);return`${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;});
+  if(chart){chart.destroy();chart=null;}
+
+  // Build feed markers — from Firestore-loaded ev.feedMarkers
+  // Markers are loaded by loadEventFeedMarkers() when event is selected.
+  // Each marker has: {ts, title, source, impact, color, sourceType, keywords}
+  const rawMarkers = r.feedMarkers || buildFallbackMarkers(r);
+  const feedMarkers = [];
+
+  rawMarkers.forEach(marker => {
+    const markerTs = new Date(marker.ts).getTime();
+    if (isNaN(markerTs)) return;
+    // Find the nearest snapshot index (within ±6 hours)
+    let bestIdx = -1, bestDiff = 6*3600*1000;
+    h.forEach((snap, i) => {
+      const diff = Math.abs(new Date(snap.ts).getTime() - markerTs);
+      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+    });
+    if (bestIdx < 0) return; // no nearby snapshot
+
+    // Use floor price at that snapshot for marker Y position
+    const y = h[bestIdx].floor || h[bestIdx].avg || 0;
+    // Stack multiple markers at same index slightly apart
+    const existing = feedMarkers.filter(m => m.x === bestIdx).length;
+    feedMarkers.push({
+      x:          bestIdx,
+      y:          y * (1 + existing * 0.015), // tiny vertical offset if stacked
+      label:      marker.title.substring(0,70) + (marker.title.length>70?'...':''),
+      source:     marker.source,
+      color:      marker.color,
+      impact:     marker.impact,
+      sourceType: marker.sourceType,
+      keywords:   (marker.keywords||[]).join(', ')
+    });
+  });
+
+  const base={responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+    plugins:{legend:{labels:{color:'#5A7A60',font:{family:"'IBM Plex Mono',monospace",size:10},boxWidth:12,padding:14}},
+      tooltip:{backgroundColor:'rgba(0,0,0,0.4)',borderColor:'#1E2E22',borderWidth:1,titleColor:'#FFB300',bodyColor:'#E8F0E8',padding:10,titleFont:{family:"'IBM Plex Mono',monospace",size:11},bodyFont:{family:"'IBM Plex Mono',monospace",size:11},
+        callbacks:{
+          afterBody: ctx=>{
+            if(!feedMarkers.length) return [];
+            const idx=ctx[0]?.dataIndex;
+            const hits=feedMarkers.filter(m=>m.x===idx);
+            if(!hits.length) return [];
+            const lines = [''];
+            hits.forEach(m => {
+              const src = m.sourceType==='espn' ? '📺 ESPN' : '🐦 X';
+              lines.push(`${src} [${m.impact||'—'}] ${m.label}`);
+              if(m.source) lines.push(`  ${m.source}`);
+              if(m.keywords) lines.push(`  keywords: ${m.keywords}`);
+            });
+            return lines;
+          }
+        }
+      }
+    },
+    scales:{x:{ticks:{color:'#5A7A60',font:{family:"'IBM Plex Mono',monospace",size:9},maxRotation:45},grid:{color:'rgba(255,255,255,0.06)'},border:{color:'rgba(255,255,255,0.08)'}},y:{ticks:{color:'#5A7A60',font:{family:"'IBM Plex Mono',monospace",size:10}},grid:{color:'rgba(255,255,255,0.06)'},border:{color:'rgba(255,255,255,0.08)'}}}};
+
+  if(cmode==='price'){
+    base.scales.y.ticks.callback=v=>'$'+v.toLocaleString();
+    base.plugins.tooltip.callbacks.label=ctx=>` ${ctx.dataset.label}: $${ctx.parsed.y.toLocaleString()}`;
+    // Single data point: increase point radius so it's visible as a dot
+    const pr = singlePoint ? 8 : 4;
+    const ds=[];
+    if(son.floor)ds.push({label:'FLOOR',data:h.map(s=>s.floor),borderColor:'#00E5FF',backgroundColor:'rgba(0,229,255,0.05)',tension:0.3,pointRadius:pr,fill:true,borderWidth:1.5,spanGaps:true});
+    if(son.med)  ds.push({label:'MEDIAN',data:h.map(s=>s.median),borderColor:'#CE93D8',backgroundColor:'rgba(206,147,216,0.05)',tension:0.3,pointRadius:pr,fill:!son.floor,borderWidth:2,spanGaps:true});
+    if(son.avg)  ds.push({label:'AVG',data:h.map(s=>s.avg),borderColor:'#FFB300',tension:0.3,pointRadius:singlePoint?8:3,fill:false,borderWidth:1.5,borderDash:singlePoint?[]:[4,3],spanGaps:true});
+    if(son.max)  ds.push({label:'MAX',data:h.map(s=>s.max),borderColor:'#FF1744',tension:0.3,pointRadius:singlePoint?8:3,fill:false,borderWidth:1,borderDash:singlePoint?[]:[2,4],spanGaps:true});
+    // Feed marker overlay dataset
+    if(feedMarkers.length){
+      ds.push({
+        label:'FEED',
+        data:h.map((_,i)=>{
+          const hit=feedMarkers.find(m=>m.x===i);
+          return hit?hit.y:null;
+        }),
+        type:'scatter',
+        pointRadius:feedMarkers.map((_,i2)=>feedMarkers.some(m=>m.x===i2)?8:0),
+        pointStyle:'triangle',
+        pointBackgroundColor:h.map((_,i)=>{
+          const hit=feedMarkers.find(m=>m.x===i);
+          return hit?hit.color:'transparent';
+        }),
+        pointBorderColor:'transparent',
+        showLine:false,
+        order:0
+      });
+    }
+    chart=new Chart(canvas,{type:'line',data:{labels,datasets:ds},options:base});
+  } else {
+    base.scales.y.ticks.callback=v=>v.toLocaleString();
+    base.plugins.tooltip.callbacks.label=ctx=>` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()}`;
+    chart=new Chart(canvas,{type:'bar',data:{labels,datasets:[{label:'LISTINGS',data:h.map(s=>s.count),backgroundColor:'rgba(165,214,167,0.2)',borderColor:'#A5D6A7',borderWidth:1.5,borderRadius:2}]},options:base});
+  }
+}
+
+// ==================================================================
+// MODULE: PORTFOLIO — Refresh, remove, next-update timers
+// ==================================================================
+
+function updateTotal(){ const t=Object.values(tracked).reduce((a,r)=>a+(r.history||[]).length,0); document.getElementById('snaptotal').textContent=`${t} SNAPSHOT${t!==1?'S':''}`; }
+async function refreshSelected(){
+  if(!selKey) return;
+  const r=tracked[selKey]; if(!r) return;
+  if(r.src==='SG'){ toast('SeatGeek disabled — remove and re-add via TEvo','err'); return; }
+
+  const btn = document.getElementById('btn-ref');
+  btn.disabled = true; btn.textContent = 'REFRESHING...';
+  setSt(`Refreshing ${r.name}...`);
+
+  try {
+    // 1. Fetch live data from TEvo → writes to Sheets + Firestore via GAS
+    await fetchTE(r.event_id, r.name, r.venue, r.performer, r.date);
+
+    // 2. Reload full history — gets ALL snapshots including the new one
+    await loadHistory(selKey);
+
+    // 3. Re-render chart and metric cards
+    if(selKey) {
+      renderDetail(selKey);
+      renderChart(tracked[selKey]);
+    }
+    setSt('READY');
+  } catch(e) {
+    toast(`REFRESH FAILED: ${e.message}`, 'err');
+    setSt('READY');
+  } finally {
+    btn.disabled = false; btn.textContent = 'REFRESH';
+  }
+}
+async function removeSelected(){
+  if(!selKey)return; try{await gasPost({action:'untrack',key:selKey});}catch(e){}
+  delete tracked[selKey]; selKey=null; renderSidebar(); updateTotal();
+  ['det-title','det-meta'].forEach((id,i)=>{document.getElementById(id).textContent=i?'—':'SELECT AN EVENT';});
+  ['lst-pill','lst-delta'].forEach(id=>document.getElementById(id).style.display='none');
+  document.getElementById('btn-ref').disabled=true; document.getElementById('btn-rem').disabled=true;
+  document.getElementById('empty-ch').style.display='flex'; document.getElementById('main-ch').style.display='none';
+  document.getElementById('snapinfo').style.display='none';
+  ['m-f','m-a','m-m','m-x','m-c'].forEach(id=>{document.getElementById(id).textContent='—';document.getElementById(id+'d').textContent='—';});
+  if(chart){chart.destroy();chart=null;} toast('REMOVED'); setSt('READY');
+}
+// Manual refresh rate limit — 5 minutes between manual triggers
+const MANUAL_REFRESH_LIMIT_MS = 5 * 60 * 1000;
+let _lastManualRefresh = 0;
+
+async function refreshAll(el){
+  const keys=Object.keys(tracked); if(!keys.length){toast('NOTHING TO REFRESH','err');return;}
+
+  // Rate limit check
+  const now = Date.now();
+  const msSinceLast = now - _lastManualRefresh;
+  if(_lastManualRefresh > 0 && msSinceLast < MANUAL_REFRESH_LIMIT_MS){
+    const secsLeft = Math.ceil((MANUAL_REFRESH_LIMIT_MS - msSinceLast) / 1000);
+    const minsLeft = Math.ceil(secsLeft / 60);
+    toast(`SLOW DOWN — next refresh in ${minsLeft}m ${secsLeft%60}s`,'err');
+    return;
+  }
+  _lastManualRefresh = now;
+
+  if(el){ el.textContent='REFRESHING...'; el.style.pointerEvents='none'; }
+  setSt('REFRESHING ALL Tracked Events...');
+  try{
+    const d=await gasPost({action:'refresh_all'});
+    if(d.ok){
+      await loadTracked();
+      renderSidebar(); renderF4Portfolio();
+      await loadIntelFeed();
+      toast(`REFRESHED: ${d.count||keys.length} events`);
+      setSt(`REFRESHED ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`);
+      // Update next-update timers after refresh
+      loadNextUpdateTimes();
+    } else {
+      for(const k of keys){selKey=k;await refreshSelected();}
+      if(keys.length) selectEvent(keys[keys.length-1]);
+      toast(`${keys.length} REFRESHED`); setSt('REFRESH COMPLETE');
+    }
+  }catch(e){
+    for(const k of keys){selKey=k;await refreshSelected();}
+    toast(`${keys.length} REFRESHED`); setSt('REFRESH COMPLETE');
+  }
+  if(el){ el.textContent='↺ REFRESH'; el.style.pointerEvents='auto'; }
+}
+
+// ================================================================
+// F2 — SEATGEEK (disabled)
+// ================================================================
+
+// ==================================================================
+// MODULE: SEARCH — F3 TEvo/SeatGeek event search
+// ==================================================================
+
+async function fetchSG(){ toast('SeatGeek disabled — use F3 or chat','err'); }
+
+// ================================================================
+// F3 — TICKET EVOLUTION
+// ================================================================
+async function searchTE(){
+  const c=getCreds(); if(!c.gas){toast('ADD GAS URL — F8','err');return;}
+  const q=document.getElementById('te-q').value.trim(); if(!q){toast('ENTER QUERY','err');return;}
+  const st=document.getElementById('te-st'),dd=document.getElementById('te-dd');
+  st.textContent='SEARCHING...'; st.style.color='var(--amber)'; dd.style.display='none';
+  try{
+    const d=await gasGet({action:'search_te',q});
+    if(d.error){st.textContent=`ERROR: ${d.error}`;st.style.color='var(--red)';return;}
+    if(!d.events?.length){st.textContent='NO EVENTS FOUND';st.style.color='var(--red)';return;}
+    st.textContent=`${d.events.length} RESULTS — SELECT ONE`; st.style.color='var(--green)';
+    dd.style.display='block';
+    dd.innerHTML=d.events.map(ev=>`<div class="ddi" onclick="fetchTE('${ev.id}','${(ev.name||'').replace(/['"]/g,'')}','${(ev.venue?.name||'UNKNOWN').replace(/['"]/g,'')}','${(ev.performances?.[0]?.performer?.name||'UNKNOWN').replace(/['"]/g,'')}','${ev.occurs_at||''}')"><div class="ddn2">${ev.name||'UNNAMED'}</div><div class="ddm">${ev.venue?.name||''} · ${ev.occurs_at?safeDate(ev.occurs_at,{month:'short',day:'numeric',year:'numeric'}):''}</div></div>`).join('');
+  }catch(e){st.textContent=`FAILED: ${e.message}`;st.style.color='var(--red)';}
+}
+async function fetchTE(eid,name,venue,perf,date){
+  document.getElementById('te-dd').style.display='none';
+  const c=getCreds(); if(!c.gas){toast('ADD GAS URL — F8','err');return;}
+  const st=document.getElementById('te-st'); st.textContent=`FETCHING ${name}...`; st.style.color='var(--amber)'; setSt('FETCHING TEVO...');
+  try{
+    const d=await gasGet({action:'fetch_te',event_id:eid,name:encodeURIComponent(name),venue:encodeURIComponent(venue),performer:encodeURIComponent(perf),date});
+    if(d.error){st.textContent=`ERROR: ${d.error}`;st.style.color='var(--red)';return;}
+    const key=await saveSnap('TE',venue,perf,eid,name,date,d.stats);
+    st.textContent=`TRACKED · ${fmtC(d.stats.count)} LISTINGS · SAVED`; st.style.color='var(--green)';
+    toast('TRACKED + SAVED'); setSt(`ADDED: ${name}`); selectEvent(key); document.getElementById('te-q').value='';
+  }catch(e){st.textContent=`FAILED: ${e.message}`;st.style.color='var(--red)';}
+}
+
+// ================================================================
+// F4 — DEMAND FEED (rss.app webhook-powered)
+// ================================================================
+
+// ==================================================================
+// MODULE: FEED — F4 live feed (X/Twitter + ESPN)
+// ==================================================================
+
+async function loadFeed(){
+  const btn=document.getElementById('btn-feed-ref');
+  btn.disabled=true; btn.textContent='FETCHING...'; setSt('FETCHING LIVE FEED...');
+  try{
+    // Fetch X/Twitter (feed_items/) and ESPN (espn_feed/) in parallel
+    const [xItems, espnItems] = await Promise.allSettled([
+      loadXFeedItems(),
+      loadEspnFeedItems()
+    ]);
+
+    xFeedItems    = xItems.status==='fulfilled'    ? xItems.value    : xFeedItems;
+    espnFeedItems = espnItems.status==='fulfilled' ? espnItems.value : espnFeedItems;
+
+    // Merge + sort by pubDate descending
+    feedItems = mergeFeeds(xFeedItems, espnFeedItems);
+
+    const xCount    = xFeedItems.length;
+    const espnCount = espnFeedItems.length;
+    const matched   = feedItems.filter(i=>i.matched||i.event_id).length;
+
+    document.getElementById('feed-badge').textContent=`${feedItems.length} ITEMS${matched?` · ${matched} MATCHED`:''}`;
+    const srcEl = document.getElementById('feed-src-counts');
+    if(srcEl) srcEl.textContent=`𝕏 ${xCount} · ESPN ${espnCount}`;
+    document.getElementById('feed-updated').textContent=` · ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`;
+
+    feedItems.length ? renderFeed() : document.getElementById('feed-list').innerHTML=`<div class="empty"><span style="font-size:16px;color:var(--border);">▬▬▬</span><span>NO ITEMS YET<span class="blink">_</span></span><span style="font-size:10px;">CREATE FEEDS IN MANAGE SOURCES · ITEMS ARRIVE VIA WEBHOOK</span></div>`;
+
+    // Update event context strip if an event is selected
+    if(selKey) updateEventFeedStrip(selKey);
+    setSt('FEED READY');
+  }catch(e){toast(`FEED FAILED: ${e.message}`,'err');setSt('FEED ERROR');}
+  btn.disabled=false; btn.textContent='REFRESH';
+}
+
+// Fetch X/Twitter items from feed_items/ Firestore
+async function loadXFeedItems(){
+  try {
+    const opts = {limit:300};
+    const docs = await FS.getFeedItems(opts);
+    return docs.map(d=>({
+      title:    d.post_text||d.title||'',
+      link:     d.post_url||d.url||'',
+      desc:     d.post_full||d.description||'',
+      pubDate:  d.posted_at||d.received_ts||'',
+      source:   d.feed_name||d.feed_title||'',
+      author:   d.author_name||'',
+      handle:   d.author_handle||'',
+      league:   d.league||d.feed_league||d.attr_league||'General',
+      impact:   d.impact||null,
+      category: d.attr_category||d.category||null,
+      matched:  d.matched||!!(d.matched_event_id),
+      event_id: d.matched_event_id||'',
+      event_name:d.matched_event_name||'',
+      price_floor:d.price_floor_at_match||0,
+      keywords: d.attr_keywords||[],
+      srcType:  'x',
+      affected_event_ids:  d.affected_event_ids||[],
+      affected_event_names:d.affected_event_names||[]
+    }));
+  } catch(e) {
+    // GAS fallback
+    const d = await gasGet({action:'get_rss_live', limit:300});
+    return (d.items||[]).map(i=>({
+      title:i.post_text||i.item_title||'', link:i.post_url||i.item_url||'',
+      desc:i.post_full||i.item_description||'',
+      pubDate:i.posted_at||i.item_published||i.received_ts||'',
+      source:i.feed_name||i.feed_title||'', author:i.author_name||'',
+      handle:i.author_handle||'', league:i.league||i.feed_league||'General',
+      impact:i.impact||null, category:i.attr_category||i.category||null,
+      matched:!!(i.matched_event_id), event_id:i.matched_event_id||'',
+      event_name:i.matched_event_name||'', price_floor:i.price_floor_at_match||0,
+      keywords:[], srcType:'x'
+    }));
+  }
+}
+
+// Fetch ESPN items from espn_feed/ Firestore
+async function loadEspnFeedItems(){
+  try {
+    const docs = await FS.query(
+      'espn_feed',
+      [{field:'matched', op:'EQUAL', value:true}],
+      [{field:'received_ts', dir:'DESCENDING'}],
+      300
+    );
+    return docs.map(d=>({
+      title:    d.title||'',
+      link:     d.article_url||'',
+      desc:     d.description||'',
+      pubDate:  d.pub_date||d.received_ts||'',
+      source:   d.creator||'ESPN',
+      author:   d.creator||'',
+      handle:   '',
+      league:   d.feed_league||'General',
+      impact:   d.impact||null,
+      category: 'espn',
+      matched:  !!(d.matched_event_id||d.matched),
+      event_id: d.matched_event_id||'',
+      event_name:d.matched_event_name||'',
+      price_floor:0,
+      keywords: (d.keywords_hit||'').split(',').filter(Boolean),
+      srcType:  'espn'
+    }));
+  } catch(e) { return []; }
+}
+
+// Merge X + ESPN, deduplicate by title similarity, sort newest first.
+// Also builds eventFeedMap: eventId → all feed items affecting that event.
+// Uses affected_event_ids (many-to-many) not just matched_event_id.
+function mergeFeeds(x, espn){
+  const all = [...x, ...espn];
+
+  // Deduplicate: same title prefix within 30 min = same story
+  const seen = new Map();
+  const merged = all
+    .filter(item => {
+      if(!item.title||item.title.length<5) return false;
+      const key = item.title.substring(0,40).toLowerCase().replace(/[^\w]/g,'');
+      const ts  = new Date(item.pubDate||0).getTime();
+      const prev = seen.get(key);
+      if(prev && Math.abs(prev.ts - ts) < 30*60*1000) return false;
+      seen.set(key, {ts});
+      return true;
+    })
+    .sort((a,b)=>new Date(b.pubDate||0)-new Date(a.pubDate||0));
+
+  // Build eventFeedMap — which feed items affect which tracked events
+  // Sources: affected_event_ids (GAS multi-match) + matched_event_id (primary)
+  const newMap = {};
+  merged.forEach(item => {
+    const eids = new Set();
+    // Add all affected events (the many-to-many field)
+    (item.affected_event_ids||[]).forEach(eid => { if(eid) eids.add(String(eid)); });
+    // Always include primary match too
+    if(item.event_id) eids.add(String(item.event_id));
+
+    eids.forEach(eid => {
+      if(!newMap[eid]) newMap[eid] = [];
+      newMap[eid].push(item);
+    });
+  });
+  eventFeedMap = newMap;
+
+  return merged;
+}
+
+
+    const prevCount=feedItems.length;
+    feedItems=items;
+    const newCount=feedItems.length;
+    const matched=feedItems.filter(i=>i.matched||i.event_id).length;
+    document.getElementById('feed-badge').textContent=`${newCount} ITEMS${matched?` · ${matched} MATCHED`:''}`;
+    document.getElementById('feed-updated').textContent=`updated ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`;
+    if(newCount>prevCount) bumpBadge('feed-badge',newCount-prevCount);
+    newCount?renderFeed():document.getElementById('feed-list').innerHTML=`<div class="empty"><span style="font-size:16px;color:var(--border);">▬▬▬</span><span>NO ITEMS YET<span class="blink">_</span></span><span style="font-size:10px;">CREATE FEEDS IN MANAGE SOURCES · ITEMS ARRIVE VIA WEBHOOK</span></div>`;
+    setSt('FEED READY');
+  }catch(e){toast(`FEED FAILED: ${e.message}`,'err');setSt('FEED ERROR');}
+  btn.disabled=false; btn.textContent='REFRESH';
+}
+async function scoreLiveFeed(){
+  const btn=document.getElementById('btn-score'); btn.disabled=true; btn.textContent='SCORING...'; setSt('AI SCORING...');
+  try{ const d=await gasPost({action:'score_rss_live'}); if(d.error){toast(`SCORE FAILED: ${d.error}`,'err');}else{toast(`${d.scored||0} ITEMS SCORED`);await loadFeed();} }
+  catch(e){toast(`SCORE FAILED: ${e.message}`,'err');}
+  btn.disabled=false; btn.textContent='SCORE WITH AI'; setSt('READY');
+}
+
+function setLF(l,el){
+  lfilt=l;
+  document.querySelectorAll('.feed-bar .fpill').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  const sub = document.getElementById('feed-subtitle');
+  if(sub){
+    if(l==='event' && selKey && tracked[selKey]) sub.textContent = `Showing: ${tracked[selKey].name} — last 14 days`;
+    else if(l==='matched') sub.textContent = 'Showing: items matched to tracked events';
+    else if(l==='all') sub.textContent = 'X/Twitter + ESPN merged · filter by league or event';
+    else sub.textContent = `Showing: ${l} · X/Twitter + ESPN`;
+  }
+  renderFeed();
+}
+function setIF(i,el){
+  ifilt=ifilt===i?null:i;
+  document.querySelectorAll('#f-high,#f-med').forEach(p=>p.classList.remove('active'));
+  if(ifilt) el.classList.add('active');
+  renderFeed();
+}
+function setSrc(s,el){
+  sfilt=sfilt===s?null:s;
+  document.querySelectorAll('#fsrc-x,#fsrc-espn').forEach(p=>p.classList.remove('active'));
+  if(sfilt) el.classList.add('active');
+  renderFeed();
+}
+
+// ── Event context feed strip ──────────────────────────────────────
+// Shown at top of F4 when an event is selected.
+// Shows items from last 14 days mentioning the event's team/performer.
+// Sources: both xFeedItems and espnFeedItems.
+function updateEventFeedStrip(key){
+  const strip  = document.getElementById('event-feed-strip');
+  const itemEl = document.getElementById('event-feed-items');
+  const label  = document.getElementById('event-feed-label');
+  const count  = document.getElementById('event-feed-count');
+  const pill   = document.getElementById('fpill-event');
+  if(!strip||!itemEl) return;
+
+  const ev = tracked[key];
+  if(!ev){ strip.style.display='none'; if(pill)pill.style.display='none'; return; }
+
+  const cutoff = Date.now() - 14*24*3600*1000;
+
+  // Primary: eventFeedMap (from affected_event_ids — many-to-many, most accurate)
+  let relevant = (eventFeedMap[String(ev.event_id||'')] || [])
+    .filter(i => new Date(i.pubDate||0).getTime() > cutoff)
+    .sort((a,b) => new Date(b.pubDate||0) - new Date(a.pubDate||0));
+
+  // Fallback: text match (for items before affected_event_ids was added)
+  if(relevant.length === 0 && feedItems.length > 0){
+    const terms = [(ev.performer||''),(ev.name||'')]
+      .flatMap(s=>s.toLowerCase().split(/\s+(?:at|vs\.?|@)\s+/).flatMap(t=>t.split(/\s+/)))
+      .map(t=>t.replace(/[^\w]/g,'').trim()).filter(t=>t.length>=4);
+    relevant = feedItems.filter(item=>{
+      if(!item.title||item.title.length<5) return false;
+      const age=new Date(item.pubDate||0).getTime();
+      if(age<cutoff) return false;
+      if(item.event_id&&String(item.event_id)===String(ev.event_id)) return true;
+      const text=(item.title+' '+(item.desc||'')).toLowerCase();
+      return terms.some(t=>text.includes(t));
+    }).sort((a,b)=>new Date(b.pubDate||0)-new Date(a.pubDate||0));
+  }
+
+  if(!relevant.length){ strip.style.display='none'; if(pill)pill.style.display='none'; return; }
+
+  strip.style.display='block';
+  if(pill) pill.style.display='inline-block';
+  const evName=(ev.name||'').length>30?(ev.name||'').substring(0,30)+'...':(ev.name||'');
+  label.textContent=`${evName} — last 14 days`;
+  const highCount=relevant.filter(i=>i.impact==='High').length;
+  count.style.color=highCount?'var(--red)':'var(--muted)';
+  count.textContent=`${relevant.length} items${highCount?' · '+highCount+' HIGH':''}`;
+
+  itemEl.innerHTML=relevant.slice(0,20).map(item=>{
+    const srcIcon=item.srcType==='espn'?'📺':'🐦';
+    const impColor=item.impact==='High'?'var(--red)':item.impact==='Medium'?'var(--amber)':'var(--muted)';
+    const handle=item.handle?item.handle:item.source||item.author||'';
+    const alsoAffects=(item.affected_event_names||[]).filter(n=>n!==ev.name).slice(0,2);
+    const alsoStr=alsoAffects.length?`<span style="color:var(--muted);"> · also: ${alsoAffects.join(', ')}</span>`:'';
+    return `<div style="display:flex;gap:8px;align-items:flex-start;padding:4px 0;border-bottom:1px solid var(--bg3);cursor:pointer;" onclick="${item.link?`window.open('${item.link.replace(/'/g,"")}','_blank')`:''}">
+      <span style="font-size:11px;flex-shrink:0;">${srcIcon}</span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:11px;color:var(--white);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${item.title}</div>
+        <div style="font-size:10px;color:var(--muted);display:flex;gap:8px;margin-top:1px;flex-wrap:wrap;">
+          <span style="color:${impColor};">${item.impact||'—'}</span><span>${handle}</span>
+          <span>${ago(item.pubDate)}</span>
+          ${item.keywords&&item.keywords.length?`<span style="color:var(--cyan);">${item.keywords.slice(0,2).join(', ')}</span>`:''}
+          ${alsoStr}
+        </div>
+      </div>
+      <button onclick="event.stopPropagation();feedToChat('${(item.title||'').replace(/['"]/g,'').substring(0,80)}','${handle}')" style="font-size:9px;padding:1px 6px;border:1px solid var(--purple);color:var(--purple);background:transparent;cursor:pointer;font-family:var(--font);flex-shrink:0;">AI</button>
+    </div>`;
+  }).join('');
+}
+
+
+function renderFeed(){
+  const kw=(document.getElementById('feed-kw').value||'').toLowerCase();
+  let items=[...feedItems];
+
+  // Source filter
+  if(sfilt==='x')    items=items.filter(i=>i.srcType==='x');
+  if(sfilt==='espn') items=items.filter(i=>i.srcType==='espn');
+
+  // League / special filters
+  if(lfilt&&lfilt!=='all'){
+    if(lfilt==='matched') items=items.filter(i=>i.matched||i.event_id);
+    else if(lfilt==='event'){
+      // Show items relevant to selected event
+      const ev=selKey?tracked[selKey]:null;
+      if(ev){
+        const terms=[(ev.performer||''),(ev.name||'')]
+          .flatMap(s=>s.toLowerCase().split(/\s+(?:at|vs\.?|@)\s+/).flatMap(t=>t.split(/\s+/)))
+          .map(t=>t.replace(/[^\w]/g,'').trim()).filter(t=>t.length>=4);
+        const cutoff=Date.now()-14*24*3600*1000;
+        items=items.filter(i=>{
+          if(new Date(i.pubDate||0).getTime()<cutoff) return false;
+          if(i.event_id&&String(i.event_id)===String(ev.event_id)) return true;
+          const text=(i.title+' '+(i.desc||'')).toLowerCase();
+          return terms.some(t=>text.includes(t));
+        });
+      }
+    }
+    else items=items.filter(i=>(i.league||'').toLowerCase()===lfilt.toLowerCase());
+  }
+
+  if(ifilt) items=items.filter(i=>i.impact===ifilt);
+  if(kw)    items=items.filter(i=>(i.title||'').toLowerCase().includes(kw)||(i.handle||'').toLowerCase().includes(kw)||(i.desc||'').toLowerCase().includes(kw)||(i.keywords||[]).some(k=>k.includes(kw)));
+
+  const el=document.getElementById('feed-list');
+  if(!items.length){el.innerHTML=`<div class="empty" style="height:200px;"><span style="color:var(--muted);font-size:11px;">NO ITEMS MATCH FILTER</span></div>`;return;}
+  el.innerHTML=items.slice(0,200).map(item=>{
+    const isMatched=item.matched||!!(item.event_id);
+    const srcIcon = item.srcType==='espn'?'<span style="font-size:9px;padding:0 4px;border:1px solid var(--cyan);color:var(--cyan);margin-right:4px;">ESPN</span>':'';
+    const authorStr = item.handle ? item.handle : item.source||item.author||'';
+    const priceStr  = item.price_floor>0 ? `<span style="font-size:9px;color:var(--cyan);margin-left:6px;">$${item.price_floor} at arrival</span>` : '';
+    const eventStr  = item.event_name ? `<span style="font-size:9px;color:var(--amber);margin-left:6px;">→ ${item.event_name.substring(0,28)}</span>` : '';
+    const kwStr     = item.keywords&&item.keywords.length ? `<span style="font-size:9px;color:var(--purple);margin-left:6px;">${item.keywords.slice(0,2).join(' · ')}</span>` : '';
+    return`<div class="fi" style="${isMatched?'border-left:3px solid var(--rss);':''}" onclick="${item.link?`window.open('${item.link.replace(/'/g,'')}','_blank')`:''}">
+      <div class="fi-top">
+        <div class="fi-title">${srcIcon}${item.title}</div>
+        ${item.impact?`<span class="fi-imp ${item.impact}">${item.impact.toUpperCase()}</span>`:''}
+        ${isMatched?`<span style="font-size:9px;padding:1px 5px;border:1px solid var(--rss);color:var(--rss);margin-left:4px;">MATCHED</span>`:''}
+      </div>
+      <div class="fi-meta">
+        <span class="fi-src">${authorStr}</span>
+        <span class="fi-tag">${item.league||'General'}</span>
+        <span class="fi-time">${ago(item.pubDate)}</span>
+        ${priceStr}${eventStr}${kwStr}
+      </div>
+      ${item.desc&&item.desc!==item.title?`<div class="fi-desc">${item.desc.substring(0,140)}${item.desc.length>140?'...':''}</div>`:''}
+      <div style="margin-top:6px;"><button onclick="event.stopPropagation();feedToChat('${(item.title||'').replace(/'/g,'').replace(/"/g,'').substring(0,80)}','${authorStr}')" style="font-size:9px;padding:2px 8px;border:1px solid var(--purple);color:var(--purple);background:transparent;cursor:pointer;font-family:var(--font);">ASK AI ↗</button></div>
+    </div>`;
+  }).join('');
+}
+function feedToChat(title, source){
+  // Switch to F6 intelligence tab
+  showPanel('intel', document.querySelectorAll('.fkey')[5]);
+  switchIntelTab('chat', document.getElementById('itab-chat'));
+  // Pre-fill the chat with context from the feed item
+  const input=document.getElementById('chat-input');
+  input.value=`This just came through the feed from ${source||'a source'}: "${title}" — what does this mean for ticket prices and inventory? Check upcoming events and related feed items.`;
+  input.focus();
+  // Scroll to bottom of chat
+  const chatEl=document.getElementById('chat-messages');
+  chatEl.scrollTop=chatEl.scrollHeight;
+  toast('FEED ITEM SENT TO CHAT');
+}
+function startFeedPoll(){
+  stopFeedPoll();
+  feedPollTimer = setInterval(loadFeed, 2*60*1000); // refresh feed every 2 min while F4 open
+}
+function stopFeedPoll(){ if(feedPollTimer){clearInterval(feedPollTimer);feedPollTimer=null;} }
+
+async function createRSSFeed(){
+  const type=document.getElementById('rss-type').value,input=document.getElementById('rss-input').value.trim(),league=document.getElementById('rss-league').value;
+  const st=document.getElementById('rss-create-status');
+  if(!input){toast('ENTER A KEYWORD OR URL','err');return;}
+  st.textContent='CREATING IN RSS.APP...'; st.style.color='var(--amber)';
+  try{
+    const payload={league}; if(type==='keyword')payload.keyword=input; else payload.url=input;
+    const d=await gasPost({action:'rss_create_feed',...payload});
+    if(d.error){st.textContent=`ERROR: ${d.error}`;st.style.color='var(--red)';return;}
+    st.textContent=`CREATED: ${d.feed?.title||input}`; st.style.color='var(--green)';
+    document.getElementById('rss-input').value=''; toast('FEED CREATED'); await loadRSSFeeds();
+  }catch(e){st.textContent=`FAILED: ${e.message}`;st.style.color='var(--red)';}
+}
+async function loadRSSFeeds(){
+  const el=document.getElementById('rss-feed-list'); el.innerHTML='<div style="color:var(--muted);font-size:11px;">Loading from rss.app...</div>';
+  try{
+    const d=await gasGet({action:'rss_list_feeds'}); const feeds=d.feeds||[];
+    const c=getCreds(); c._rssCount=feeds.length; localStorage.setItem(CKEY,JSON.stringify(c)); updateSrcBar(c);
+    if(!feeds.length){el.innerHTML='<div style="color:var(--muted);font-size:11px;">No feeds yet — create one above</div>';return;}
+    el.innerHTML=feeds.map(f=>`<div class="src-row"><div class="src-name" title="${f.source_url||''}">${f.title||f.id}</div><span style="font-size:10px;color:${f.is_active?'var(--green)':'var(--muted)'};">${f.is_active?'ACTIVE':'OFF'}</span><a href="${f.rss_feed_url||'#'}" target="_blank" style="font-size:10px;color:var(--rss);text-decoration:none;flex-shrink:0;">RSS ↗</a><button class="src-del" onclick="deleteRSSFeed('${f.id}','${(f.title||f.id).replace(/'/g,'')}')">REMOVE</button></div>`).join('');
+  }catch(e){el.innerHTML=`<div style="color:var(--red);font-size:11px;">FAILED: ${e.message}</div>`;}
+}
+async function deleteRSSFeed(feedId,name){ if(!confirm(`Remove "${name}" from rss.app?`))return; try{await gasPost({action:'rss_delete_feed',feed_id:feedId});toast(`REMOVED: ${name}`);await loadRSSFeeds();}catch(e){toast(`FAILED: ${e.message}`,'err');} }
+function updateRssLabel(){ const t=document.getElementById('rss-type').value,lbl=document.getElementById('rss-input-lbl'),inp=document.getElementById('rss-input'); if(t==='url'){lbl.textContent='WEBSITE URL';inp.placeholder='e.g. https://espn.com/nba';}else{lbl.textContent='KEYWORD OR TOPIC';inp.placeholder='e.g. Lakers injury, NBA trade deadline';} }
+
+// ================================================================
+// F5 — THEME ENGINE
+// ================================================================
+let currentTheme={preset:'default',custom:{},bg:'none',cursor:'default',name:'',marquee:''};
+const PRESETS={
+  default:{},
+  matrix:{'--bg':'#000800','--bg2':'#001200','--bg3':'#001A00','--amber':'#00FF41','--amber2':'#00CC33','--green':'#00FF41','--cyan':'#00FF41','--purple':'#00FF41','--white':'#CCFFCC','--muted':'#2A6B2A','--border':'#003300','--rss':'#00FF41','--sg':'#00FF41','--te':'#00FF41'},
+  myspace:{'--bg':'#220033','--bg2':'#2D0044','--bg3':'#380055','--amber':'#FF00FF','--amber2':'#CC00CC','--green':'#FF00FF','--cyan':'#FF99FF','--purple':'#FF00FF','--white':'#FFD6FF','--muted':'#9933AA','--border':'#550077','--rss':'#FF00FF'},
+  aol:{'--bg':'#000033','--bg2':'#000044','--bg3':'#000055','--amber':'#FFCC00','--amber2':'#FF9900','--green':'#00CC00','--cyan':'#00CCFF','--purple':'#CC99FF','--white':'#EEEEFF','--muted':'#4444AA','--border':'#0000AA','--rss':'#FF6600'},
+  geocities:{'--bg':'#000000','--bg2':'#0A0A1A','--bg3':'#111122','--amber':'#FF6600','--amber2':'#FF3300','--green':'#FFFF00','--cyan':'#00FFFF','--purple':'#FF00FF','--white':'#FFFFFF','--muted':'#666666','--border':'#333333','--rss':'#FF6600'},
+  winamp:{'--bg':'#1A1A2E','--bg2':'#16213E','--bg3':'#0F3460','--amber':'#E94560','--amber2':'#C73652','--green':'#00B4D8','--cyan':'#90E0EF','--purple':'#E94560','--white':'#CAF0F8','--muted':'#457B9D','--border':'#1D3557','--rss':'#E94560'},
+  livejournal:{'--bg':'#1A0A00','--bg2':'#240E00','--bg3':'#2E1200','--amber':'#FF8C00','--amber2':'#FF6600','--green':'#ADFF2F','--cyan':'#FFD700','--purple':'#FF69B4','--white':'#FFF5E6','--muted':'#7A4A00','--border':'#3D1A00','--rss':'#FF8C00'},
+  xanga:{'--bg':'#0D0D1A','--bg2':'#141428','--bg3':'#1A1A33','--amber':'#66CCFF','--amber2':'#3399FF','--green':'#66FF66','--cyan':'#66CCFF','--purple':'#CC99FF','--white':'#E6F0FF','--muted':'#336699','--border':'#1A3366','--rss':'#66CCFF'}
+};
+const BG_MAPS={none:{bg:'',size:''},dots:{bg:'radial-gradient(circle,rgba(255,255,255,0.12) 1px,transparent 1px)',size:'18px 18px'},grid:{bg:'linear-gradient(rgba(255,255,255,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.04) 1px,transparent 1px)',size:'22px 22px'},scanline:{bg:'repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.2) 2px,rgba(0,0,0,0.2) 4px)',size:'auto'},stars:{bg:'radial-gradient(1px 1px at 20% 30%,white,transparent),radial-gradient(1px 1px at 40% 70%,white,transparent),radial-gradient(1px 1px at 60% 20%,white,transparent),radial-gradient(1px 1px at 80% 60%,white,transparent)',size:'auto'},diagonal:{bg:'repeating-linear-gradient(45deg,rgba(255,255,255,0.02),rgba(255,255,255,0.02) 1px,transparent 1px,transparent 10px)',size:'auto'},circuit:{bg:'linear-gradient(rgba(0,255,65,0.05) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,65,0.05) 1px,transparent 1px)',size:'40px 40px'},noise:{bg:'',size:''}};
+
+
+// ==================================================================
+// MODULE: THEME — F5 theme engine
+// ==================================================================
+
+function applyPreset(name,el){ currentTheme.preset=name;currentTheme.custom={}; document.querySelectorAll('.theme-card').forEach(c=>c.classList.remove('active')); if(el)el.classList.add('active'); const root=document.documentElement; Object.keys(PRESETS.matrix).forEach(v=>root.style.removeProperty(v)); Object.entries(PRESETS[name]||{}).forEach(([k,v])=>root.style.setProperty(k,v)); syncColorPickers(); }
+function applyCustomColor(v,val){ currentTheme.custom[v]=val; document.documentElement.style.setProperty(v,val); }
+function syncColorPickers(){ const s=getComputedStyle(document.documentElement); const m={'--bg':'c-bg','--bg2':'c-bg2','--amber':'c-amber','--white':'c-white','--sg':'c-sg','--te':'c-te','--border':'c-border','--muted':'c-muted'}; Object.entries(m).forEach(([v,id])=>{const el=document.getElementById(id);if(!el)return;const val=s.getPropertyValue(v).trim();if(val.startsWith('#')&&val.length>=7)el.value=val.substring(0,7);}); }
+function applyBG(name,el){ currentTheme.bg=name; document.querySelectorAll('.bg-card').forEach(c=>c.classList.remove('active')); if(el)el.classList.add('active'); const p=BG_MAPS[name]||BG_MAPS.none,t=document.querySelector('.terminal'); t.style.backgroundImage=p.bg; t.style.backgroundSize=p.size; }
+function applyCursor(name,el){ currentTheme.cursor=name; document.querySelectorAll('.cur-card').forEach(c=>c.classList.remove('active')); if(el)el.classList.add('active'); document.body.style.cursor=name==='none'?'none':name; }
+function applyTermName(val){
+  currentTheme.name=val;
+  const d = val.trim() || 'S4K Terminal';
+  const el = document.getElementById('term-title');
+  if(el) el.innerHTML = `${d} <span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:6px;">Ticket Market Analytics</span>`;
+  const badge = document.getElementById('ver-badge');
+  if(badge) badge.textContent = APP_VERSION;
+  document.title = val.trim() || 'S4K Terminal';
+}
+function applyMarquee(val){ currentTheme.marquee=val; const p=document.getElementById('marquee-preview'),inn=document.getElementById('marquee-inner'); if(!val.trim()){p.style.display='none';removeMarqueeBar();return;} p.style.display='block';inn.textContent=val;applyMarqueeBar(val); }
+function applyMarqueeBar(text){ removeMarqueeBar();if(!text)return; const bar=document.createElement('div');bar.id='marquee-bar';bar.style.cssText='overflow:hidden;border-bottom:1px solid var(--border);padding:3px 0;background:var(--bg2);flex-shrink:0;';bar.innerHTML=`<div style="white-space:nowrap;font-size:10px;color:var(--amber);animation:marquee 14s linear infinite;display:inline-block;padding-left:100%;letter-spacing:0.1em;">${text}</div>`;document.querySelector('.statusbar').insertAdjacentElement('afterend',bar); }
+function removeMarqueeBar(){ const el=document.getElementById('marquee-bar');if(el)el.remove(); }
+function saveTheme(){ localStorage.setItem(TKEY,JSON.stringify(currentTheme));toast('THEME SAVED'); }
+function resetTheme(){ currentTheme={preset:'default',custom:{},bg:'none',cursor:'default',name:'',marquee:''}; applyPreset('default',document.getElementById('preset-default'));applyBG('none',document.getElementById('bg-none'));applyCursor('default',document.getElementById('cur-default'));document.getElementById('term-name').value='';document.getElementById('marquee-text').value='';applyTermName('');applyMarquee('');document.body.style.cursor='';localStorage.removeItem(TKEY);toast('THEME RESET'); }
+function loadTheme(){ try{ const saved=JSON.parse(localStorage.getItem(TKEY)||'null');if(!saved)return;currentTheme=saved;applyPreset(saved.preset||'default',document.getElementById(`preset-${saved.preset||'default'}`));Object.entries(saved.custom||{}).forEach(([k,v])=>document.documentElement.style.setProperty(k,v));if(saved.bg)applyBG(saved.bg,document.getElementById(`bg-${saved.bg}`));if(saved.cursor)applyCursor(saved.cursor,document.getElementById(`cur-${saved.cursor}`));if(saved.name){document.getElementById('term-name').value=saved.name;applyTermName(saved.name);}if(saved.marquee){document.getElementById('marquee-text').value=saved.marquee;applyMarqueeBar(saved.marquee);}syncColorPickers();}catch(e){} }
+
+// ================================================================
+// F6 — INTELLIGENCE
+// ================================================================
+
+// ==================================================================
+// MODULE: INTELLIGENCE — F6 intel feed + AI chat
+// ==================================================================
+
+function switchIntelTab(tab,el){ document.querySelectorAll('.itab').forEach(t=>t.classList.remove('active'));el.classList.add('active');document.querySelectorAll('.intel-panel').forEach(p=>p.classList.remove('active'));document.getElementById(`intel-${tab}`).classList.add('active');if(tab==='feed')loadIntelFeed(); }
+async function loadIntelFeed(){
+  setSt('LOADING INTELLIGENCE FEED...');
+  try{
+    const d=await gasGet({action:'get_feed',limit:100});
+    const prevUnread=intelItems.filter(i=>!i.read||i.read==='false'||i.read===false).length;
+    intelItems=d.items||[];
+    const unread=intelItems.filter(i=>!i.read||i.read==='false'||i.read===false).length;
+    const badge=document.getElementById('unread-badge'); if(unread>0){badge.textContent=unread;badge.style.display='inline-block';}else badge.style.display='none';
+    // Bump nav badge if new unread items arrived
+    if(unread>prevUnread) bumpBadge('intel-badge',unread-prevUnread);
+    renderIntelFeed(); setSt('INTELLIGENCE READY');
+  }catch(e){setSt('INTELLIGENCE FEED ERROR');}
+}
+function setIntelType(type,el){ intelTypeFilter=type; document.querySelectorAll('.intel-toolbar .fpill').forEach(p=>p.classList.remove('active'));el.classList.add('active'); renderIntelFeed(); }
+function renderIntelFeed(){
+  const el=document.getElementById('intel-feed-list');
+  let items=[...intelItems]; if(intelTypeFilter!=='all')items=items.filter(i=>i.type===intelTypeFilter);
+  document.getElementById('intel-count').textContent=`${items.length} item${items.length!==1?'s':''}`;
+  if(!items.length){el.innerHTML=`<div class="empty" style="height:200px;"><span style="color:var(--muted);font-size:11px;">NO ${intelTypeFilter.toUpperCase()} ITEMS YET</span></div>`;return;}
+  el.innerHTML=items.map(item=>{
+    const isRead=item.read===true||item.read==='true',isSaved=item.saved===true||item.saved==='true';
+    return`<div class="icard type-${item.type}" onclick="expandCard('body-${item.id}')" style="opacity:${isRead?'0.6':'1'}">
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><span class="icard-type ${item.type}">${(item.type||'').toUpperCase()}</span>${item.severity&&item.severity!=='info'?`<span class="isev ${item.severity}">${item.severity.toUpperCase()}</span>`:''} ${item.event_name&&item.event_name!=='ALL EVENTS'?`<span style="font-size:10px;color:var(--muted);">${item.event_name}</span>`:''}<span class="icard-time">${ago(item.ts)}</span></div>
+      <div class="icard-title">${item.title||'Untitled'}</div>
+      <div class="icard-body" id="body-${item.id}">${(item.body||'').replace(/\n/g,'<br>')}</div>
+      <div class="icard-actions" onclick="event.stopPropagation()"><button class="iact" onclick="markRead('${item.id}')">MARK READ</button><button class="iact ${isSaved?'saved':''}" onclick="saveItem('${item.id}')">${isSaved?'SAVED ★':'SAVE'}</button><button class="iact" onclick="askAboutItem('${item.id}')">ASK AI ↗</button></div>
+    </div>`;
+  }).join('');
+}
+function expandCard(bodyId){ const el=document.getElementById(bodyId);if(el)el.classList.toggle('open'); }
+async function markRead(id){ try{await gasPost({action:'mark_read',id});}catch(e){} const item=intelItems.find(i=>i.id===id);if(item)item.read=true; renderIntelFeed(); }
+async function saveItem(id){ try{await gasPost({action:'save_item',id});}catch(e){} const item=intelItems.find(i=>i.id===id);if(item)item.saved=true; renderIntelFeed();toast('ITEM SAVED'); }
+function askAboutItem(id){ const item=intelItems.find(i=>i.id===id);if(!item)return; switchIntelTab('chat',document.getElementById('itab-chat')); document.getElementById('chat-input').value=`Tell me more about: ${item.title}`; document.getElementById('chat-input').focus(); }
+async function generateStory(){ if(!selKey){toast('SELECT AN EVENT IN F1 FIRST','err');return;} setSt('GENERATING STORY...'); try{const d=await gasPost({action:'generate_story',event_key:selKey});if(d.error){toast(`FAILED: ${d.error}`,'err');return;}toast('STORY GENERATED');await loadIntelFeed();switchIntelTab('feed',document.getElementById('itab-feed'));setSt('STORY READY');}catch(e){toast(`FAILED: ${e.message}`,'err');} }
+async function generateBrief(){ setSt('GENERATING BRIEF...'); try{const d=await gasPost({action:'generate_brief'});if(d.error){toast(`FAILED: ${d.error}`,'err');return;}toast('BRIEF GENERATED');await loadIntelFeed();switchIntelTab('feed',document.getElementById('itab-feed'));setSt('BRIEF READY');}catch(e){toast(`FAILED: ${e.message}`,'err');} }
+async function generateDigest(){ setSt('GENERATING DIGEST...'); try{const d=await gasPost({action:'generate_digest'});if(d.error){toast(`FAILED: ${d.error}`,'err');return;}toast('DIGEST GENERATED');await loadIntelFeed();switchIntelTab('feed',document.getElementById('itab-feed'));setSt('DIGEST READY');}catch(e){toast(`FAILED: ${e.message}`,'err');} }
+
+// ── Chat with TEvo tool use ───────────────────────────────────────
+async function sendChat(){
+  if(chatWaiting)return;
+  const input=document.getElementById('chat-input');
+  const msg=input.value.trim(); if(!msg)return;
+  input.value=''; chatWaiting=true;
+  const sendBtn=document.getElementById('chat-send-btn'); sendBtn.disabled=true; sendBtn.textContent='...';
+  appendChatMsg('user',msg);
+  chatHistory.push({role:'user',content:msg});
+  const thinkId='think-'+Date.now();
+  appendChatMsg('ai','<span class="blink">▋</span>',thinkId);
+  try{
+    const d=await gasPost({action:'chat',message:msg+getUserVarsContext(),history:chatHistory.slice(-6)});
+    document.getElementById(thinkId)?.remove();
+    if(d.error){ appendChatMsg('ai',`ERROR: ${d.error}`); chatHistory.pop(); }
+    else{
+      if(d.tools_used?.length){
+        const hints=d.tools_used.map(t=>{
+          if(t.tool==='search_te_events') return`searched TEvo for "${t.input.query}"`;
+          if(t.tool==='fetch_te_listings') return`fetched listings for ${t.input.event_name}`;
+          if(t.tool==='get_tracked_events') return'pulled tracked events';
+          return t.tool;
+        });
+        appendToolHint(hints.join(' · '));
+      }
+      if(d.reply) appendChatMsg('ai',d.reply);
+      if(d.events_found?.length) appendEventCards(d.events_found,d.listings_found||[]);
+      chatHistory.push({role:'assistant',content:d.reply||''});
+    }
+  }catch(e){ document.getElementById(thinkId)?.remove(); appendChatMsg('ai',`FAILED: ${e.message}`); chatHistory.pop(); }
+  chatWaiting=false; sendBtn.disabled=false; sendBtn.textContent='SEND';
+}
+
+// ── Markdown renderer for chat messages ──────────────────────────
+// Converts Claude's markdown output to clean HTML.
+// Handles: bold, italic, inline code, code blocks, tables, lists, headers.
+function renderMarkdown(text) {
+  if (!text) return '';
+  let html = text;
+
+  // Code blocks (``` ... ```) — preserve before other processing
+  const codeBlocks = [];
+  html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(`<pre style="background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:3px;padding:8px 12px;overflow-x:auto;font-size:11px;line-height:1.5;margin:6px 0;"><code style="font-family:var(--font);color:#A5D6A7;">${code.replace(/</g,'&lt;').replace(/>/g,'&gt;').trim()}</code></pre>`);
+    return `\x00CODE${idx}\x00`;
+  });
+
+  // Tables — | col | col | rows
+  html = html.replace(/(\|.+\|\n)+/g, tableBlock => {
+    const rows = tableBlock.trim().split('\n').filter(r => r.trim());
+    const isSep = r => /^[\|\s\-:]+$/.test(r);
+    let out = '<table style="width:100%;border-collapse:collapse;font-size:11px;margin:6px 0;">';
+    let inHead = true;
+    rows.forEach(row => {
+      if (isSep(row)) { inHead = false; return; }
+      const cells = row.split('|').map(c=>c.trim()).filter((_,i,a)=>i>0&&i<a.length-1);
+      const tag = inHead ? 'th' : 'td';
+      const style = inHead
+        ? 'padding:4px 8px;border-bottom:1px solid var(--border);color:var(--amber);text-align:left;'
+        : 'padding:4px 8px;border-bottom:1px solid var(--bg3);color:var(--white);';
+      out += `<tr>${cells.map(c=>`<${tag} style="${style}">${c}</${tag}>`).join('')}</tr>`;
+    });
+    out += '</table>';
+    return out;
+  });
+
+  // Headers
+  html = html.replace(/^### (.+)$/gm, '<div style="font-size:12px;color:var(--amber);font-weight:600;margin:8px 0 4px;">$1</div>');
+  html = html.replace(/^## (.+)$/gm,  '<div style="font-size:13px;color:var(--white);font-weight:600;margin:10px 0 4px;">$1</div>');
+  html = html.replace(/^# (.+)$/gm,   '<div style="font-size:14px;color:var(--white);font-weight:700;margin:10px 0 6px;">$1</div>');
+
+  // Bullet lists
+  html = html.replace(/((?:^[ \t]*[-*+] .+\n?)+)/gm, block => {
+    const items = block.trim().split('\n').map(l => l.replace(/^[ \t]*[-*+] /, '').trim());
+    return '<ul style="margin:4px 0 4px 16px;padding:0;list-style:disc;">' +
+           items.map(i=>`<li style="margin:2px 0;color:var(--white);font-size:11px;">${i}</li>`).join('') +
+           '</ul>';
+  });
+
+  // Numbered lists
+  html = html.replace(/((?:^[ \t]*\d+\. .+\n?)+)/gm, block => {
+    const items = block.trim().split('\n').map(l => l.replace(/^[ \t]*\d+\. /, '').trim());
+    return '<ol style="margin:4px 0 4px 16px;padding:0;">' +
+           items.map(i=>`<li style="margin:2px 0;color:var(--white);font-size:11px;">${i}</li>`).join('') +
+           '</ol>';
+  });
+
+  // Inline formatting
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong style="color:var(--white);">$1</strong>');
+  html = html.replace(/__(.+?)__/g,     '<strong style="color:var(--white);">$1</strong>');
+  html = html.replace(/\*(.+?)\*/g,     '<em style="color:var(--muted);">$1</em>');
+  html = html.replace(/_([^_]+)_/g,     '<em style="color:var(--muted);">$1</em>');
+  html = html.replace(/`([^`]+)`/g,     '<code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;font-size:10px;font-family:var(--font);">$1</code>');
+
+  // Dollar amounts — highlight in cyan
+  html = html.replace(/\$(\d[\d,.]+)/g, '<span style="color:var(--cyan);">$$$1</span>');
+
+  // Horizontal rule
+  html = html.replace(/^---+$/gm, '<hr style="border:none;border-top:1px solid var(--border);margin:8px 0;">');
+
+  // Line breaks
+  html = html.replace(/\n\n+/g, '<br><br>');
+  html = html.replace(/\n/g,    '<br>');
+
+  // Restore code blocks
+  codeBlocks.forEach((block, i) => {
+    html = html.replace(`\x00CODE${i}\x00`, block);
+  });
+
+  return html;
+}
+
+function appendChatMsg(role, content, id){
+  const el  = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = `cmsg ${role}`;
+  if(id) div.id = id;
+  const rendered = role === 'assistant'
+    ? renderMarkdown(content)
+    : content.replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+  div.innerHTML = `<div class="cmsg-label">${role==='user'?'YOU':'S4K INTELLIGENCE'}</div><div class="cbubble">${rendered}</div>`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+  return div;
+}
+
+function appendToolHint(text){
+  const el=document.getElementById('chat-messages');
+  const div=document.createElement('div'); div.className='chat-tool-hint';
+  div.textContent=`⚙ ${text}`; el.appendChild(div); el.scrollTop=el.scrollHeight;
+}
+
+function appendEventCards(events, listingsFound){
+  const el=document.getElementById('chat-messages');
+  const wrap=document.createElement('div'); wrap.style.cssText='padding:0 0 8px 0;';
+  const listingsMap={};
+  (listingsFound||[]).forEach(l=>{if(l.event_id)listingsMap[String(l.event_id)]=l;});
+  const trackedIds=new Set(Object.values(tracked).map(t=>String(t.event_id)));
+
+  // Pull feed items once for all cards
+  const allFeedItems=[...feedItems]; // already loaded from F4 poll
+
+  events.forEach(ev=>{
+    chatEventStore[String(ev.id)] = ev;
+
+    const card=document.createElement('div'); card.className='te-event-card';
+    const dateStr=(ev.date_local||ev.date)?safeDate(ev.date_local||ev.date,{month:'short',day:'numeric',year:'numeric',weekday:'short'}):'TBD';
+    const isTracked=trackedIds.has(String(ev.id));
+    const lst=listingsMap[String(ev.id)];
+    const avail=ev.available_count||0;
+    const availColor=avail>200?'var(--green)':avail>50?'var(--amber)':avail>0?'var(--rss)':'var(--muted)';
+
+    // KPI movement from tracked history — guard against bad snapshot values
+    let kpiHtml='';
+    if(isTracked){
+      const tKey=Object.keys(tracked).find(k=>String(tracked[k].event_id)===String(ev.id));
+      const tev=tKey?tracked[tKey]:null;
+      if(tev&&tev.history&&tev.history.length){
+        // Find most recent snapshot with valid floor > 0
+        const validSnaps=tev.history.filter(s=>s.floor>0&&s.avg>0);
+        if(validSnaps.length){
+          const lat=validSnaps[validSnaps.length-1];
+          const prev=validSnaps.length>1?validSnaps[validSnaps.length-2]:null;
+          const fd=prev?lat.floor-prev.floor:null;
+          const cd=prev?lat.count-prev.count:null;
+          kpiHtml=`<div style="display:flex;gap:10px;padding:5px 0;border-top:1px solid var(--border);margin-top:4px;flex-wrap:wrap;">
+            <span style="font-size:10px;"><span style="color:var(--muted);">FLOOR </span><span style="color:var(--cyan);">$${lat.floor}</span>${fd!==null?` <span style="${fd>0?'color:var(--red)':'color:var(--green)'}">${fd>0?'▲':'▼'}$${Math.abs(fd)}</span>`:''}</span>
+            <span style="font-size:10px;"><span style="color:var(--muted);">AVG </span><span style="color:var(--amber);">$${lat.avg}</span></span>
+            <span style="font-size:10px;"><span style="color:var(--muted);">LST </span><span style="color:#A5D6A7;">${(lat.count||0).toLocaleString()}</span>${cd!==null?` <span style="${cd<0?'color:var(--red)':'color:var(--green)'}">${cd>0?'+':''}${cd}</span>`:''}</span>
+            <span style="font-size:9px;color:var(--muted);margin-left:auto;">${validSnaps.length} snaps</span>
+          </div>`;
+        }
+      }
+    }
+
+    // F4 feed matches — search rss_live for this specific event's teams/venue
+    const feedTerms=[ev.name, ev.performer, ev.venue]
+      .flatMap(s=>(s||'').toLowerCase().split(/\s+at\s+|\s+vs\.?\s+|\s+@\s+/))
+      .map(s=>s.replace(/[^\w\s]/g,'').trim())
+      .filter(s=>s.length>=3);
+    const feedMatches=allFeedItems.filter(item=>{
+      const t=(item.title||item.item_title||'').trim();
+      if(t.length<=5||/^pic\.?$|^image$|^photo$/i.test(t)) return false;
+      const text=[
+        item.title||item.item_title||'',
+        item.desc||item.item_description||'',
+        item.source||item.feed_title||''
+      ].join(' ').toLowerCase();
+      return feedTerms.some(t=>text.includes(t));
+    }).slice(0,3);
+
+    let feedHtml='';
+    if(feedMatches.length){
+      feedHtml=`<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,107,53,0.3);">
+        <div style="font-size:9px;color:var(--rss);letter-spacing:.08em;margin-bottom:4px;">F4 FEED · ${feedMatches.length} RELATED</div>`+
+        feedMatches.map(item=>`
+          <div style="padding:3px 0;font-size:10px;line-height:1.4;">
+            <span style="color:var(--white);">${(item.title||item.item_title||'').substring(0,80)}${(item.title||item.item_title||'').length>80?'...':''}</span>
+            ${item.impact?`<span style="margin-left:6px;font-size:9px;padding:0 4px;border:1px solid;border-radius:2px;color:${item.impact==='High'?'var(--red)':item.impact==='Medium'?'var(--amber)':'var(--green)'};border-color:${item.impact==='High'?'var(--red)':item.impact==='Medium'?'var(--amber)':'var(--green)'};">${item.impact}</span>`:''}
+            <div style="color:var(--muted);font-size:9px;">${item.source||item.feed_title||''} · ${ago(item.pubDate||item.item_published||item.received_ts||'')}</div>
+            ${item.reason?`<div style="color:var(--amber);font-size:9px;">${item.reason}</div>`:''}
+          </div>`).join('')+
+        `</div>`;
+    }
+
+    card.innerHTML=`
+      <div class="te-event-name">${ev.name}</div>
+      <div class="te-event-meta">
+        <span>${ev.venue}${ev.venue_city?', '+ev.venue_city:''}</span>
+        <span>${dateStr}</span>
+        <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+          <span style="font-size:10px;color:${availColor};">${avail>0?avail+' lstg':'no listings'}</span>
+          ${ev.popularity?`<span style="font-size:10px;color:var(--muted);">${(ev.popularity*100).toFixed(0)}% pop</span>`:''}
+        </span>
+      </div>
+      ${lst?`<div class="te-event-stats">
+        <span class="te-stat"><span>FLOOR</span><span style="color:var(--cyan);">$${lst.stats.floor}</span></span>
+        <span class="te-stat"><span>MEDIAN</span><span style="color:var(--purple);">$${lst.stats.median}</span></span>
+        <span class="te-stat"><span>AVG</span><span style="color:var(--amber);">$${lst.stats.avg}</span></span>
+        <span class="te-stat"><span>LST</span><span style="color:#A5D6A7;">${lst.stats.count}</span></span>
+      </div>`:''}
+      ${kpiHtml}
+      ${feedHtml}
+      <div id="weather-${ev.id}" style="font-size:10px;color:var(--muted);padding:3px 0;display:none;border-top:1px solid var(--border);margin-top:4px;"></div>
+      <div class="te-card-btns">
+        <button id="tc-${ev.id}" class="te-btn track ${isTracked?'done':''}" data-evid="${ev.id}" ${isTracked?'disabled':''}>${isTracked?'TRACKED ✓':'TRACK'}</button>
+        <button id="gp-${ev.id}" class="te-btn prices" data-evid="${ev.id}">GET PRICES</button>
+      </div>`;
+
+    const trackBtn=card.querySelector(`#tc-${ev.id}`);
+    const pricesBtn=card.querySelector(`#gp-${ev.id}`);
+    if(!isTracked&&trackBtn) trackBtn.addEventListener('click',()=>trackFromChat(String(ev.id)));
+    if(pricesBtn){
+      if(lst){ pricesBtn.textContent='PRICES SHOWN'; pricesBtn.disabled=true; pricesBtn.style.opacity='0.4'; }
+      else { pricesBtn.addEventListener('click',()=>fetchChatListings(String(ev.id))); }
+    }
+
+    // Auto-fetch weather inline if within 15 days
+    if(ev.venue_city&&(ev.date||ev.date_local)){
+      const daysOut=Math.round((new Date(ev.date||ev.date_local)-new Date())/864e5);
+      if(daysOut>=0&&daysOut<=15){
+        const wEl=card.querySelector(`#weather-${ev.id}`);
+        gasGet({action:'get_weather',city:encodeURIComponent(ev.venue_city),date:new Date(ev.date||ev.date_local).toISOString().split('T')[0]})
+          .then(w=>{
+            if(w.ok&&wEl){
+              wEl.style.display='block';
+              const precipColor=w.precip_pct>30?'var(--rss)':'var(--muted)';
+              wEl.innerHTML=`${w.weather_label} · ${w.high_f}°/${w.low_f}°F · <span style="color:${precipColor};">${w.precip_pct}% precip</span> · ${w.wind_mph}mph wind`;
+            }
+          }).catch(()=>{});
+      }
+    }
+
+    wrap.appendChild(card);
+  });
+  el.appendChild(wrap); el.scrollTop=el.scrollHeight;
+}
+
+// Track without requiring listings — registers event, fetches stats + weather + feed in ONE reply
+async function trackFromChat(eid){
+  const ev = chatEventStore[eid];
+  if(!ev) return;
+  const btn=document.getElementById(`tc-${eid}`); if(!btn||btn.disabled)return;
+  btn.textContent='TRACKING...'; btn.style.opacity='0.5';
+  try{
+    const venueId     = ev.venue     ? 'v_'+ev.venue.replace(/[^\w]/g,'_').substring(0,30).toLowerCase() : '';
+    const performerId = ev.performer ? 'p_'+ev.performer.replace(/[^\w]/g,'_').substring(0,30).toLowerCase() : '';
+    const evRecord = {
+      key: `TE::${String(ev.id)}`,  // canonical TEvo key — event_id only
+      src:'TE', event_id:String(ev.id), name:ev.name||'',
+      venue_id:venueId, venue:ev.venue||'', venue_city:ev.venue_city||'',
+      performer_id:performerId, performer:ev.performer||'',
+      date:ev.date||ev.date_local||'', added_at:new Date().toISOString(), history:[]
+    };
+
+    await gasPost({action:'track', event:evRecord});
+    tracked[evRecord.key] = evRecord;
+    renderSidebar(); updateTotal();
+    btn.textContent='TRACKED ✓'; btn.classList.add('done'); btn.disabled=true; btn.style.opacity='1';
+    toast(`TRACKING: ${ev.name}`);
+    appendToolHint(`${ev.name} added · loading market data...`);
+
+    // Fetch stats + weather in parallel
+    const statsPromise = gasGet({
+      action:'fetch_te_stats', event_id:String(ev.id),
+      name:encodeURIComponent(ev.name||''), venue:encodeURIComponent(ev.venue||''),
+      performer:encodeURIComponent(ev.performer||''), date:ev.date||ev.date_local||''
+    });
+
+    const weatherPromise = (ev.venue_city && (ev.date||ev.date_local)) ? (() => {
+      const daysOut = Math.round((new Date(ev.date||ev.date_local)-new Date())/864e5);
+      return daysOut>=0&&daysOut<=15
+        ? gasGet({action:'get_weather', city:ev.venue_city, date:new Date(ev.date||ev.date_local).toISOString().split('T')[0]})
+        : Promise.resolve(null);
+    })() : Promise.resolve(null);
+
+    const [statsData, weatherData] = await Promise.all([statsPromise, weatherPromise]);
+
+    // Build single unified reply
+    const lines = [];
+    const dateStr = ev.date ? safeDateFull(ev.date) : '';
+    lines.push(`**${ev.name}** — Now tracking`);
+    lines.push(`${ev.venue}${ev.venue_city?', '+ev.venue_city:''} · ${dateStr}`);
+
+    // Stats block
+    if(statsData?.ok && statsData.stats){
+      const s=statsData.stats, ext=statsData.extras||{};
+      saveSnap('TE',ev.venue||'',ev.performer||'',String(ev.id),ev.name||'',ev.date||ev.date_local||'',s);
+      renderSidebar();
+      lines.push('');
+      lines.push(`**Market** — Floor: $${s.floor} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listing groups [${statsData.source_label||'TEvo Stats'}]`);
+      if(ext.tickets_count>0) lines.push(`${ext.tickets_count.toLocaleString()} tickets · Popularity: ${((ext.popularity_score||0)*100).toFixed(0)}%`);
+    }
+
+    // Weather block
+    if(weatherData?.ok){
+      const w=weatherData;
+      const precipFlag = w.precip_pct>30 ? ` ⚠ ${w.precip_pct}% precip` : ` · ${w.precip_pct}% precip`;
+      lines.push('');
+      lines.push(`**Weather** — ${w.weather_label} · ${w.high_f}°/${w.low_f}°F${precipFlag} · ${w.wind_mph}mph`);
+    }
+
+    // Feed context block — from already-loaded feedItems
+    const feedTerms = [ev.name, ev.performer, ev.venue]
+      .flatMap(s=>(s||'').toLowerCase().split(/\s+at\s+|\s+vs\.?\s+|\s+@\s+/))
+      .map(s=>s.replace(/[^\w\s]/g,'').trim()).filter(s=>s.length>=3);
+    const feedMatches = feedItems.filter(item=>{
+      const t=(item.title||'').trim();
+      if(t.length<=5||/^pic\.?$|^image$/i.test(t)) return false;
+      const text=[item.title||'',item.desc||'',item.source||''].join(' ').toLowerCase();
+      return feedTerms.some(term=>text.includes(term));
+    }).slice(0,3);
+
+    if(feedMatches.length){
+      lines.push('');
+      lines.push(`**Feed (${feedMatches.length} related)**`);
+      feedMatches.forEach(item=>{
+        const impact=item.impact?` [${item.impact}]`:'';
+        lines.push(`· ${item.title.substring(0,90)}${impact}`);
+        if(item.reason&&item.reason!=='matched') lines.push(`  _${item.reason}_`);
+      });
+    } else {
+      lines.push('');
+      lines.push(`_No feed signals for this event — add keyword feeds in F9 to monitor_`);
+    }
+
+    appendChatMsg('ai', lines.join('\n'));
+  }catch(e){
+    btn.textContent='ERROR'; btn.style.color='var(--red)'; btn.style.borderColor='var(--red)'; btn.style.opacity='1';
+    appendToolHint(`Track failed: ${e.message}`);
+  }
+}
+
+async function fetchChatListings(eid){
+  const ev = chatEventStore[eid];
+  if(!ev) return;
+  const btn=document.getElementById(`gp-${eid}`);
+  if(btn){ btn.textContent='LOADING...'; btn.disabled=true; }
+  appendToolHint(`fetching listings for ${ev.name}...`);
+
+  try{
+    // Fetch listings + weather in parallel
+    const listingsPromise = gasGet({
+      action:'fetch_te', event_id:eid,
+      name:encodeURIComponent(ev.name||''), venue:encodeURIComponent(ev.venue||''),
+      performer:encodeURIComponent(ev.performer||''), date:ev.date||ev.date_local||''
+    });
+
+    const weatherPromise = (ev.venue_city&&(ev.date||ev.date_local)) ? (() => {
+      const daysOut=Math.round((new Date(ev.date||ev.date_local)-new Date())/864e5);
+      return daysOut>=0&&daysOut<=15
+        ? gasGet({action:'get_weather',city:ev.venue_city,date:new Date(ev.date||ev.date_local).toISOString().split('T')[0]})
+        : Promise.resolve(null);
+    })() : Promise.resolve(null);
+
+    const [d, weatherData] = await Promise.all([listingsPromise, weatherPromise]);
+
+    if(d.ok && d.stats && d.stats.count>0){
+      const s=d.stats, w=d.wholesale_stats||{};
+      const srcLabel=d.source_label||(d.source==='listings'?'TEvo Live':'TEvo Stats');
+      const lines=[];
+      const dateStr=ev.date?safeDateFull(ev.date):'';
+      lines.push(`**${ev.name}**`);
+      lines.push(`${ev.venue}${ev.venue_city?', '+ev.venue_city:''} · ${dateStr}`);
+      lines.push('');
+
+      // Pricing with source tag
+      lines.push(`**Retail** — Floor: $${s.floor} · Median: $${s.median} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listings [${srcLabel}]`);
+      if(w.floor&&w.count>0&&(w.floor!==s.floor||w.avg!==s.avg))
+        lines.push(`**Wholesale** — Floor: $${w.floor} · Avg: $${w.avg} · Max: $${w.max}`);
+      if(d.delivery?.in_hand_count>0||d.delivery?.instant_delivery_count>0)
+        lines.push(`${d.delivery.in_hand_count||0} in-hand · ${d.delivery.instant_delivery_count||0} instant delivery`);
+      if(d.source==='stats') lines.push(`_(aggregate stats — live listings not available)_`);
+
+      // Weather
+      if(weatherData?.ok){
+        const wr=weatherData;
+        const precipFlag=wr.precip_pct>30?` ⚠ ${wr.precip_pct}% precip`:` · ${wr.precip_pct}% precip`;
+        lines.push('');
+        lines.push(`**Weather** — ${wr.weather_label} · ${wr.high_f}°/${wr.low_f}°F${precipFlag} · ${wr.wind_mph}mph`);
+      }
+
+      // Feed context
+      const feedTerms=[ev.name,ev.performer,ev.venue]
+        .flatMap(s=>(s||'').toLowerCase().split(/\s+at\s+|\s+vs\.?\s+|\s+@\s+/))
+        .map(s=>s.replace(/[^\w\s]/g,'').trim()).filter(s=>s.length>=3);
+      const feedMatches=feedItems.filter(item=>{
+        const t=(item.title||'').trim();
+        if(t.length<=5||/^pic\.?$|^image$/i.test(t)) return false;
+        const text=[item.title||'',item.desc||'',item.source||''].join(' ').toLowerCase();
+        return feedTerms.some(term=>text.includes(term));
+      }).slice(0,3);
+
+      lines.push('');
+      if(feedMatches.length){
+        lines.push(`**Feed (${feedMatches.length} related)**`);
+        feedMatches.forEach(item=>{
+          const impact=item.impact?` [${item.impact}]`:'';
+          lines.push(`· ${item.title.substring(0,90)}${impact}`);
+          if(item.reason&&item.reason!=='matched') lines.push(`  _${item.reason}_`);
+        });
+      } else {
+        lines.push(`_No feed signals — check F9 to add keyword feeds_`);
+      }
+
+      appendChatMsg('ai', lines.join('\n'));
+      if(btn){ btn.textContent='PRICES SHOWN'; btn.style.opacity='0.4'; }
+
+      // Auto-save snapshot if tracked
+      const key=`TE::${eid}`;
+      if(tracked[key]){ saveSnap('TE',ev.venue||'',ev.performer||'',eid,ev.name||'',ev.date||ev.date_local||'',s); renderSidebar(); }
+      return;
+    }
+
+    appendChatMsg('ai', `${ev.name}\n${d.error||'No listings or stats available'}`);
+    if(btn){ btn.textContent='NO DATA'; btn.style.opacity='0.5'; }
+
+  }catch(e){
+    appendChatMsg('ai', `Failed to fetch: ${e.message}`);
+    if(btn){ btn.textContent='GET PRICES'; btn.disabled=false; }
+  }
+}
+
+async function testListings(){
+  const eid = document.getElementById('test-event-id').value.trim();
+  const btn = document.getElementById('btn-test-listings');
+  const el  = document.getElementById('test-listings-result');
+  btn.disabled=true; btn.textContent='TESTING...';
+  el.style.display='block'; el.textContent='Running 4 tests against TEvo /v9/listings...';
+  try{
+    const params = {action:'test_listings'};
+    if(eid) params.event_id = eid;
+    const d = await gasGet(params);
+    if(d.error){ el.textContent=`ERROR: ${d.error}`; btn.disabled=false; btn.textContent='RUN TEST'; return; }
+    const r = d.results||{};
+    el.innerHTML = Object.entries(r).map(([test, res])=>{
+      const ok = res.status===200;
+      const col = ok?'var(--green)':res.status===401?'var(--red)':'var(--amber)';
+      return `<div style="border-bottom:1px solid var(--border);padding:4px 0;">
+        <span style="color:${col};font-weight:500;">${test}</span>
+        <span style="color:var(--muted);margin-left:8px;">HTTP ${res.status||'ERR'}</span>
+        ${res.error?`<div style="color:var(--red);padding-left:10px;">${res.error}</div>`:''}
+        <div style="color:var(--muted);padding-left:10px;word-break:break-all;">${res.body||''}</div>
+      </div>`;
+    }).join('');
+  }catch(e){ el.textContent=`FAILED: ${e.message}`; }
+  btn.disabled=false; btn.textContent='RUN TEST';
+}
+
+// ================================================================
+// F8 DEBUG LOG
+// ================================================================
+
+// ==================================================================
+// MODULE: SETTINGS — F8/F9 user settings, debug
+// ==================================================================
+
+async function loadDebug(){
+  const el=document.getElementById('debug-log');
+  const btn=document.getElementById('btn-debug');
+  el.textContent='Loading...'; btn.disabled=true;
+  try{
+    const d=await gasGet({action:'get_debug',limit:80});
+    if(!d.rows||!d.rows.length){ el.textContent='No debug entries yet — trigger a GET PRICES to populate.'; btn.disabled=false; return; }
+    el.innerHTML=d.rows.map(r=>{
+      const ts=new Date(r.ts).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+      const lvlColor=r.level==='ERROR'?'var(--red)':r.level==='WARN'?'var(--amber)':'var(--green)';
+      return `<div style="border-bottom:1px solid var(--border);padding:3px 0;">
+        <span style="color:var(--muted);">${ts}</span>
+        <span style="color:${lvlColor};margin:0 6px;font-weight:500;">${r.level}</span>
+        <span style="color:var(--cyan);">[${r.source}]</span>
+        <span style="color:var(--white);margin-left:6px;">${r.message}</span>
+        ${r.detail?`<div style="color:var(--muted);padding-left:12px;word-break:break-all;">${r.detail}</div>`:''}
+      </div>`;
+    }).join('');
+  }catch(e){ el.textContent=`FAILED: ${e.message}`; }
+  btn.disabled=false;
+}
+
+async function clearDebugSheet(){
+  if(!confirm('Clear debug log in Sheets?')) return;
+  try{ await gasPost({action:'clear_debug'}); document.getElementById('debug-log').textContent='Cleared.'; }
+  catch(e){ toast(`FAILED: ${e.message}`,'err'); }
+}
+
+// ================================================================
+// BADGE SYSTEM
+// ================================================================
+const badgeCounts={feed:0,intel:0};
+function updateBadge(id,count){
+  const el=document.getElementById(id);
+  if(!el)return;
+  if(count>0){el.textContent=count>99?'99+':count;el.style.display='inline';}
+  else{el.style.display='none';}
+}
+function clearBadge(id){
+  const key=id.replace('-badge','');
+  badgeCounts[key]=0; updateBadge(id,0);
+}
+function bumpBadge(id,n=1){
+  const key=id.replace('-badge','');
+  const panelMap={'feed-badge':'panel-feed','intel-badge':'panel-intel'};
+  const panel=document.getElementById(panelMap[id]);
+  if(panel&&panel.style.display!=='none')return;
+  badgeCounts[key]=(badgeCounts[key]||0)+n;
+  updateBadge(id,badgeCounts[key]);
+}
+
+// ================================================================
+// USER SETTINGS PANEL (F9)
+// ================================================================
+async function loadUserSettings(){
+  try{
+    const [sd,kd]=await Promise.all([gasGet({action:'get_settings'}),gasGet({action:'get_keywords'})]);
+    if(sd.ok){
+      document.getElementById('us-last-refresh').textContent=sd.last_auto_refresh
+        ?new Date(sd.last_auto_refresh).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})
+        :'Never (run setupTriggers() in GAS)';
+      document.getElementById('us-refresh-count').textContent=sd.auto_refresh_count||'0';
+      document.getElementById('us-tracked-count').textContent=sd.tracked_count||Object.keys(tracked).length;
+    }
+    renderKeywords(kd.keywords||[]);
+    renderAutoTrackedTerms();
+    // Load saved user vars
+    const savedVars=localStorage.getItem('s4k_user_vars');
+    if(savedVars) document.getElementById('user-vars-input').value=savedVars;
+    // Load saved custom theme CSS
+    const savedThemeCSS=localStorage.getItem('s4k_custom_theme_css');
+    if(savedThemeCSS) document.getElementById('theme-css-input').value=savedThemeCSS;
+  }catch(e){toast(`Settings load failed: ${e.message}`,'err');}
+}
+
+// ── User Variables ────────────────────────────────────────────────
+function saveUserVars(){
+  const raw=document.getElementById('user-vars-input').value.trim();
+  const status=document.getElementById('uv-status');
+  if(!raw){ localStorage.removeItem('s4k_user_vars'); status.textContent='Cleared.'; return; }
+  try{
+    JSON.parse(raw); // validate
+    localStorage.setItem('s4k_user_vars', raw);
+    status.textContent='Saved ✓ — Claude will use this on next chat message';
+    status.style.color='var(--green)';
+    toast('CONTEXT SAVED');
+  }catch(e){
+    status.textContent='Invalid JSON — check syntax';
+    status.style.color='var(--red)';
+  }
+}
+
+function previewUserVars(){
+  const raw=document.getElementById('user-vars-input').value.trim();
+  try{
+    JSON.parse(raw||'{}');
+    showPanel('intel',document.getElementById('fkey-intel'));
+    switchIntelTab('chat',document.getElementById('itab-chat'));
+    document.getElementById('chat-input').value='What should I know about my current trading context and how does it affect my tracked events?';
+    document.getElementById('chat-input').focus();
+    toast('PREVIEW QUERY LOADED — PRESS SEND');
+  }catch(e){ toast('Fix JSON syntax first','err'); }
+}
+
+function getUserVarsContext(){
+  try{
+    const raw=localStorage.getItem('s4k_user_vars');
+    if(!raw) return '';
+    const vars=JSON.parse(raw);
+    return `\n\nUSER TRADING CONTEXT:\n${JSON.stringify(vars,null,2)}`;
+  }catch(e){ return ''; }
+}
+
+// ── Custom Theme CSS ──────────────────────────────────────────────
+
+// ==================================================================
+// MODULE: THEME — Custom CSS, export, reset
+// ==================================================================
+
+function applyCustomThemeCSS(){
+  const css=document.getElementById('theme-css-input').value.trim();
+  const status=document.getElementById('theme-css-status');
+  if(!css){ status.textContent='Nothing to apply'; return; }
+  // Extract variables from :root block and apply to documentElement
+  try{
+    const match=css.match(/:root\s*\{([^}]+)\}/s)||[null,css];
+    const vars=match[1]||css;
+    let applied=0;
+    vars.split(';').forEach(decl=>{
+      const [k,v]=(decl||'').split(':').map(s=>s.trim());
+      if(k&&k.startsWith('--')&&v){
+        document.documentElement.style.setProperty(k,v);
+        applied++;
+      }
+    });
+    localStorage.setItem('s4k_custom_theme_css', css);
+    status.textContent=`Applied ${applied} variables ✓`;
+    status.style.color='var(--green)';
+    toast('THEME APPLIED');
+  }catch(e){
+    status.textContent=`Error: ${e.message}`;
+    status.style.color='var(--red)';
+  }
+}
+
+function exportCurrentTheme(){
+  const vars=['--bg','--bg2','--bg3','--border','--muted','--white','--green','--red','--amber','--amber2','--cyan','--purple','--rss','--te','--te-bg','--te-bd','--sg','--sg-bg','--sg-bd','--font'];
+  const style=getComputedStyle(document.documentElement);
+  const lines=vars.map(v=>`  ${v}: ${style.getPropertyValue(v).trim()};`).join('\n');
+  const block=`:root {\n${lines}\n}`;
+  document.getElementById('theme-css-input').value=block;
+  navigator.clipboard?.writeText(block).catch(()=>{});
+  toast('CURRENT THEME EXPORTED — PASTE INTO AI TO MODIFY');
+}
+
+function resetCustomThemeCSS(){
+  localStorage.removeItem('s4k_custom_theme_css');
+  // Reset all overrides to stylesheet defaults
+  const vars=['--bg','--bg2','--bg3','--border','--muted','--white','--green','--red','--amber','--amber2','--cyan','--purple','--rss','--te','--te-bg','--te-bd','--sg','--sg-bg','--sg-bd','--font'];
+  vars.forEach(v=>document.documentElement.style.removeProperty(v));
+  document.getElementById('theme-css-input').value='';
+  document.getElementById('theme-css-status').textContent='Reset to default ✓';
+  toast('THEME RESET');
+}
+
+// Load saved custom theme CSS on init
+(function loadSavedThemeCSS(){
+  const saved=localStorage.getItem('s4k_custom_theme_css');
+  if(!saved) return;
+  try{
+    const match=saved.match(/:root\s*\{([^}]+)\}/s)||[null,saved];
+    const vars=match[1]||saved;
+    vars.split(';').forEach(decl=>{
+      const [k,v]=(decl||'').split(':').map(s=>s.trim());
+      if(k&&k.startsWith('--')&&v) document.documentElement.style.setProperty(k,v);
+    });
+  }catch(e){}
+})();
+
+
+// ==================================================================
+// MODULE: SETTINGS — Keywords, auto-tracked terms
+// ==================================================================
+
+function renderKeywords(keywords){
+  const el=document.getElementById('kw-list');
+  if(!keywords.length){el.innerHTML='<div style="color:var(--muted);font-size:10px;">No keywords yet — add one above.</div>';return;}
+  el.innerHTML=keywords.map(kw=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);">
+      <span style="color:var(--white);font-size:11px;flex:1;">${kw.keyword}</span>
+      <span style="font-size:9px;padding:1px 6px;border:1px solid var(--border);color:var(--muted);">${kw.league||'all'}</span>
+      <span style="font-size:9px;color:var(--muted);">${kw.match_count||0} matches</span>
+      ${kw.last_matched?`<span style="font-size:9px;color:var(--muted);">${ago(kw.last_matched)}</span>`:''}
+      <button onclick="removeKeyword('${kw.id}')" style="font-size:9px;padding:1px 6px;border:1px solid var(--red);color:var(--red);background:transparent;cursor:pointer;font-family:var(--font);">✕</button>
+    </div>`).join('');
+}
+
+function renderAutoTrackedTerms(){
+  const el=document.getElementById('auto-tracked-terms');
+  if(!el)return;
+  const terms=new Set();
+  Object.values(tracked).forEach(ev=>{
+    const name=(ev.name||ev.event_name||'').toLowerCase();
+    name.split(/\s+(?:at|vs\.?|@)\s+/).forEach(t=>{
+      t.split(/\s+/).filter(w=>w.length>3).forEach(w=>terms.add(w));
+    });
+    if(ev.performer&&ev.performer.length>3)terms.add(ev.performer.toLowerCase());
+  });
+  if(!terms.size){el.textContent='No tracked events yet.';return;}
+  el.innerHTML=[...terms].map(t=>`<span style="display:inline-block;margin:2px;padding:1px 8px;border:1px solid var(--border);color:var(--cyan);font-size:10px;">${t}</span>`).join('');
+}
+
+async function addKeyword(){
+  const kw=document.getElementById('kw-input').value.trim();
+  const league=document.getElementById('kw-league').value;
+  if(!kw)return;
+  try{
+    const d=await gasPost({action:'add_keyword',keyword:kw,league});
+    if(d.duplicate){toast('Keyword already tracked','err');return;}
+    document.getElementById('kw-input').value='';
+    toast(`TRACKING: "${kw}"`);
+    loadUserSettings();
+  }catch(e){toast(`Failed: ${e.message}`,'err');}
+}
+
+async function removeKeyword(id){
+  try{
+    await gasPost({action:'remove_keyword',id});
+    loadUserSettings();
+    toast('KEYWORD REMOVED');
+  }catch(e){toast(`Failed: ${e.message}`,'err');}
+}
+
+// ================================================================
+// F4 PORTFOLIO SNAPSHOT SECTION
+// ================================================================
+
+// ==================================================================
+// MODULE: FEED — F4 portfolio snapshot strip
+// ==================================================================
+
+function renderF4Portfolio(){
+  const el=document.getElementById('f4-portfolio');
+  if(!el)return;
+  const evs=Object.values(tracked);
+  if(!evs.length){el.innerHTML='<div style="color:var(--muted);font-size:10px;padding:8px 0;">No tracked events yet.</div>';return;}
+  el.innerHTML=`<div style="font-size:9px;color:var(--cyan);letter-spacing:.1em;margin-bottom:6px;">PORTFOLIO — ${evs.length} TRACKED</div>`+
+    evs.map(ev=>{
+      const hist=(ev.history||[]).filter(s=>s.floor>0&&s.avg>0);
+      const lat=hist.length?hist[hist.length-1]:null;
+      const prev=hist.length>1?hist[hist.length-2]:null;
+      const fd=lat&&prev?lat.floor-prev.floor:null;
+      const cd=lat&&prev?lat.count-prev.count:null;
+      const dateStr=ev.date?safeDate(ev.date,{month:'short',day:'numeric'}):''
+      return `<div style="padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <div style="flex:1;min-width:120px;">
+          <div style="font-size:10px;color:var(--white);line-height:1.3;">${(ev.name||ev.event_name||'').substring(0,40)}</div>
+          <div style="font-size:9px;color:var(--muted);">${dateStr}</div>
+        </div>
+        ${lat?`
+          <span style="font-size:10px;"><span style="color:var(--muted);">FL </span><span style="color:var(--cyan);">$${lat.floor}</span>${fd!==null?`<span style="color:${fd>0?'var(--red)':'var(--green)'};">${fd>0?'▲':'▼'}${Math.abs(fd)}</span>`:''}</span>
+          <span style="font-size:10px;"><span style="color:var(--muted);">AVG </span><span style="color:var(--amber);">$${lat.avg}</span></span>
+          <span style="font-size:10px;"><span style="color:var(--muted);">LST </span><span style="color:#A5D6A7;">${(lat.count||0)}</span>${cd!==null?`<span style="color:${cd<0?'var(--red)':'var(--green)'};">${cd>0?'+':''}${cd}</span>`:''}</span>
+        `:`<span style="font-size:9px;color:var(--muted);">no data</span>`}
+      </div>`;
+    }).join('');
+}
+
+// ================================================================
+// 5-MINUTE SNAPSHOT POLL — silently detects hourly auto-refresh
+// ================================================================
+// ================================================================
+// REAL-TIME FIRESTORE LISTENER
+// ================================================================
+// Replaces the old 5-min checkForNewSnapshots poll.
+// Uses Firestore REST :listen endpoint (Server-Sent Events).
+// When GAS writes a new tevo/ snapshot, terminal receives it
+// within seconds and updates only the affected event's chart.
+//
+// Firestore :listen uses long-polling (keepalive HTTP connection).
+// If connection drops (tab sleep, network), auto-reconnects.
+// Falls back to 5-min poll if Firestore auth not available.
+// ================================================================
+
+let _realtimeController = null; // AbortController for cleanup
+let _realtimeRetryTimer = null;
+let _realtimeActive     = false;
+
+
+// ==================================================================
+// MODULE: REALTIME — Firestore SSE stream + poll
+// ==================================================================
+
+async function startRealtimeListener() {
+  stopRealtimeListener();
+  try {
+    const token = await FS.getToken();
+    if (!token) throw new Error('no token');
+    _realtimeActive = true;
+    listenToTevoSnapshots(token);
+  } catch(e) {
+    // Firestore not ready — fall back to polling
+    console.log('[realtime] Firestore not ready, falling back to 5-min poll');
+    startSnapshotPoll();
+  }
+}
+
+function stopRealtimeListener() {
+  if(_realtimeController) { _realtimeController.abort(); _realtimeController=null; }
+  if(_realtimeRetryTimer)  { clearTimeout(_realtimeRetryTimer); _realtimeRetryTimer=null; }
+  stopSnapshotPoll();
+}
+
+async function listenToTevoSnapshots(token) {
+  // Firestore Listen API — streams document changes via chunked HTTP
+  // Listens to ALL docs in tevo/ collection
+  // Only processes docs for events we're currently tracking
+  const projectId = await FS.getProjectId();
+  if (!projectId) { startSnapshotPoll(); return; }
+
+  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:listen`;
+
+  const body = JSON.stringify({
+    database: `projects/${projectId}/databases/(default)`,
+    addTarget: {
+      query: {
+        parent: `projects/${projectId}/databases/(default)/documents`,
+        structuredQuery: {
+          from: [{collectionId:'tevo'}],
+          orderBy: [{field:{fieldPath:'snapshot_ts'}, direction:'DESCENDING'}],
+          limit: {value: 1} // only latest per query hit — we handle filtering
+        }
+      },
+      targetId: 1
+    }
+  });
+
+  _realtimeController = new AbortController();
+
+  try {
+    const response = await fetch(url, {
+      method:  'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body,
+      signal: _realtimeController.signal
+    });
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    setSt('LIVE ● FIRESTORE STREAMING');
+
+    while(true) {
+      const {done, value} = await reader.read();
+      if(done) break;
+
+      buffer += decoder.decode(value, {stream:true});
+
+      // Firestore streams JSON objects separated by newlines
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // keep incomplete line
+
+      for(const line of lines) {
+        const trimmed = line.trim();
+        if(!trimmed || trimmed === '[' || trimmed === ']' || trimmed === ',') continue;
+        try {
+          const msg = JSON.parse(trimmed.replace(/^,/, ''));
+          handleFirestoreStreamMessage(msg);
+        } catch(e) {}
+      }
+    }
+  } catch(e) {
+    if(e.name === 'AbortError') return; // intentional stop
+    console.log('[realtime] stream ended:', e.message);
+  }
+
+  // Reconnect after brief delay unless intentionally stopped
+  if(_realtimeActive) {
+    _realtimeRetryTimer = setTimeout(async () => {
+      try {
+        const newToken = await FS.getToken();
+        listenToTevoSnapshots(newToken);
+      } catch(e) { startSnapshotPoll(); }
+    }, 3000);
+  }
+}
+
+function handleFirestoreStreamMessage(msg) {
+  // Firestore stream messages have different shapes
+  // documentChange = new/updated doc
+  // targetChange with CURRENT = initial load complete
+  if (!msg.documentChange) return;
+
+  const rawDoc = msg.documentChange.document;
+  if (!rawDoc || !rawDoc.fields) return;
+
+  // Decode the snapshot doc
+  const snap = FS._decodeFields(rawDoc.fields);
+  if (!snap.event_id || !snap.floor) return;
+
+  const eventId = String(snap.event_id);
+
+  // Find the matching tracked event
+  const key = Object.keys(tracked).find(k =>
+    String(tracked[k].event_id) === eventId
+  );
+  if (!key) return; // not a tracked event
+
+  const ev = tracked[key];
+  const newPoint = {
+    ts:     snap.snapshot_ts||new Date().toISOString(),
+    floor:  Math.round(Number(snap.floor||0)),
+    avg:    Math.round(Number(snap.avg||0)),
+    median: Math.round(Number(snap.median||0)),
+    max:    Math.round(Number(snap.max||0)),
+    count:  Math.round(Number(snap.count||0))
+  };
+
+  if(newPoint.floor <= 0 || isNaN(newPoint.floor)) return;
+
+  // Check if we already have this snapshot (dedup by ts)
+  const alreadyHave = (ev.history||[]).some(h => h.ts === newPoint.ts);
+  if(alreadyHave) return;
+
+  // Append new data point
+  if(!ev.history) ev.history = [];
+  ev.history.push(newPoint);
+  ev.history.sort((a,b) => a.ts.localeCompare(b.ts)); // keep chronological
+
+  // Update UI — only re-render what changed
+  renderSidebar();
+  if(selKey === key) {
+    renderDetail(key); // updates price cards + chart
+    setSt(`LIVE UPDATE: ${ev.name} · Floor $${newPoint.floor}`);
+    // Refresh feed markers in background after new snapshot
+    loadEventFeedMarkers(key).then(() => {
+      if(selKey === key) renderChart(tracked[key]);
+    }).catch(()=>{});
+  }
+
+  // Update next-update timer
+  const daysUntilN = ev.date ? Math.max(0,(new Date(ev.date)-new Date())/864e5) : 999;
+  const windowMins = daysUntilN<=2 ? 15 : daysUntilN<=7 ? 30 : 240;
+  const nextTs     = new Date(new Date(newPoint.ts).getTime() + windowMins*60*1000);
+  _nextUpdateMap[eventId] = {
+    next_update_ts:    nextTs.toISOString(),
+    mins_until_update: Math.max(0,Math.round((nextTs-new Date())/60000)),
+    window_mins:       windowMins,
+    last_snapshot_ts:  newPoint.ts
+  };
+
+  updateTotal();
+}
+
+let snapshotPollTimer=null, lastSnapshotTs=null;
+function startSnapshotPoll(){
+  stopSnapshotPoll();
+  snapshotPollTimer=setInterval(checkForNewSnapshots,5*60*1000);
+}
+function stopSnapshotPoll(){if(snapshotPollTimer){clearInterval(snapshotPollTimer);snapshotPollTimer=null;}}
+async function checkForNewSnapshots(){
+  try{
+    const d=await gasGet({action:'get_settings'});
+    if(!d.ok||!d.last_auto_refresh)return;
+    if(d.last_auto_refresh===lastSnapshotTs)return;
+    lastSnapshotTs=d.last_auto_refresh;
+    await loadAllHistories();
+    renderSidebar();
+    renderF4Portfolio();
+    const intelPanel=document.getElementById('panel-intel');
+    if(intelPanel&&intelPanel.style.display!=='none') loadIntelFeed();
+    const feedPanel=document.getElementById('panel-feed');
+    if(feedPanel&&feedPanel.style.display!=='none') loadFeed();
+    bumpBadge('intel-badge',1);
+    bumpBadge('feed-badge',1);
+    toast('↺ Portfolio updated');
+    setSt(`LAST REFRESH: ${new Date(d.last_auto_refresh).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`);
+  }catch(e){}
+}
+
+// ================================================================
+// INIT
+// ================================================================
+
+// ==================================================================
+// MODULE: CORE — App init, tutorial
+// ==================================================================
+
+async function init(){
+  loadCreds();
+  loadTheme();
+
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  }
+
+  const c = getCreds();
+  if(!c.gas){
+    showPanel('creds', document.querySelector('.fkey[onclick*="creds"]'));
+    setSt('ADD GAS URL IN F8 TO CONNECT');
+    return;
+  }
+
+  // ── Parallel warmup — kick off everything simultaneously ──────
+  // GAS cold start takes 3-8s; warming it and the Firestore token
+  // in parallel before we need them cuts perceived load by ~50%.
+  setSt('CONNECTING...');
+
+  // Fire GAS ping + Firestore token warmup simultaneously
+  // Neither blocks the sidebar from rendering
+  const warmup = Promise.allSettled([
+    gasGet({action:'ping'}).catch(()=>{}),
+    FS.getToken().catch(()=>{})
+  ]);
+
+  // Load session-cached events instantly (0ms render)
+  await loadTracked();
+
+  // Background: settings + next-update timers (non-blocking)
+  warmup.then(() => {
+    gasGet({action:'get_settings'}).then(d=>{
+      if(d.ok && d.last_auto_refresh) lastSnapshotTs = d.last_auto_refresh;
+      if(d.ok && d.event_next_update){ _nextUpdateMap = d.event_next_update; renderSidebar(); }
+    }).catch(()=>{});
+    loadNextUpdateTimes();
+  }).catch(()=>{});
+
+  // Default panel + tutorial
+  showPanel('intel', document.getElementById('fkey-intel'));
+  switchIntelTab('chat', document.getElementById('itab-chat'));
+  setTimeout(showTutorial, 150);
+}
+
+function showTutorial(){
+  // Only show once per session
+  if(sessionStorage.getItem('s4k_tutorial_shown')) return;
+  sessionStorage.setItem('s4k_tutorial_shown','1');
+
+  const el=document.getElementById('chat-messages');
+  // Clear any existing content (placeholder or old messages)
+  if(el.children.length===0 || (el.children.length===1 && el.firstElementChild.classList.contains('chat-placeholder'))){
+    el.innerHTML='';
+  } else if(el.children.length > 0){
+    // Chat already has messages — don't overwrite
+    return;
+  }
+
+  const lines=[
+    `**Welcome to S4K Intelligence** — your ticket market analyst.`,
+    ``,
+    `Here's what you can do right now:`,
+    ``,
+    `**Find events + pricing**`,
+    `· _"Knicks games this week"_ — search TEvo, see listing counts + weather`,
+    `· _"Lakers tonight"_ — pulls market data, feed signals, and weather in one shot`,
+    `· _"Get prices for Indiana Pacers at MSG"_ — floor, median, avg, wholesale`,
+    ``,
+    `**Portfolio**`,
+    `· Click **TRACK** on any event card to add it to your portfolio`,
+    `· Tracked events auto-refresh every hour and push price alerts to F4 + F6`,
+    `· Ask _"what's moving in my portfolio?"_ for a delta summary`,
+    ``,
+    `**Feed intelligence**`,
+    `· F4 shows your live demand feed — rss.app keyword feeds push here`,
+    `· Click **ASK AI ↗** on any feed item to analyze it here`,
+    `· Add keywords in **F9 Settings** to auto-flag relevant news`,
+    ``,
+    `**Auto-refresh**`,
+    `· Run \`setupTriggers()\` in GAS editor once to enable hourly auto-refresh`,
+    `· The **↺ REFRESH** button in the topbar triggers a full portfolio refresh now`,
+    ``,
+    `_Type anything below to get started, or click an example above._`
+  ];
+
+  const div=document.createElement('div');
+  div.className='cmsg ai';
+  div.innerHTML=`<div class="cmsg-label">S4K INTELLIGENCE</div><div class="cbubble">${renderMarkdown(lines.join('\n'))}</div>`;
+  el.appendChild(div);
+
+  // Quick-action chips
+  const chips=[
+    'lakers tonight','knicks this week','show me my portfolio','search rangers playoffs'
+  ];
+  const chipWrap=document.createElement('div');
+  chipWrap.style.cssText='display:flex;gap:6px;flex-wrap:wrap;padding:4px 0 8px 0;';
+  chips.forEach(chip=>{
+    const btn=document.createElement('button');
+    btn.textContent=chip;
+    btn.style.cssText='font-size:10px;padding:3px 10px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:var(--font);border-radius:2px;';
+    btn.onmouseenter=()=>btn.style.color='var(--white)';
+    btn.onmouseleave=()=>btn.style.color='var(--muted)';
+    btn.onclick=()=>{
+      document.getElementById('chat-input').value=chip;
+      sendChat();
+    };
+    chipWrap.appendChild(btn);
+  });
+  el.appendChild(chipWrap);
+  el.scrollTop=el.scrollHeight;
+}
+init();

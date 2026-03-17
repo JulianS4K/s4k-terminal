@@ -517,8 +517,17 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
           <span style="color:var(--white);">ANTHROPIC_API_KEY</span> · AI chat + scoring + briefs<br>
           <span style="color:var(--white);">RSS_APP_KEY</span> · rss.app API key<br>
           <span style="color:var(--white);">RSS_APP_SECRET</span> · rss.app secret<br>
+          <span style="color:var(--white);">FIREBASE_PROJECT_ID</span> · Firestore project ID ✓<br>
+          <span style="color:var(--white);">FIREBASE_CLIENT_EMAIL</span> · service account email ✓<br>
+          <span style="color:var(--white);">FIREBASE_PRIVATE_KEY</span> · service account private key ✓<br>
           <span style="color:var(--white);">SLACK_WEBHOOK</span> · optional Slack push
         </div>
+        <div class="sectitle" style="margin-top:20px;">
+          <div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--cyan);display:inline-block;"></div>
+          FIRESTORE DIRECT READ TEST
+          <button class="tmbtn" onclick="testFirestore()" style="font-size:9px;margin-left:8px;color:var(--cyan);border-color:var(--cyan);" id="btn-test-fs">TEST</button>
+        </div>
+        <div id="fs-test-box" class="connbox" style="display:none;"></div>
         <div class="sectitle" style="margin-top:20px;">
           <div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--cyan);display:inline-block;"></div>
           LISTINGS ENDPOINT TEST
@@ -665,7 +674,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // STATE
 // ================================================================
 const CKEY='s4k_v526', TKEY='s4k_theme_v1';
-const APP_VERSION='Alpha 1.0'; // single source of truth — update on every release
+const APP_VERSION='Alpha 1.1'; // single source of truth — update on every release
 // Migrate GAS URL from any previous CKEY version so users don't lose settings on version bump
 (function migrateCreds(){
   if(localStorage.getItem(CKEY)) return; // already on current version
@@ -728,6 +737,168 @@ async function gasPost(b){
   if(!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
+
+// ================================================================
+// FirestoreReader — direct terminal → Firestore reads
+// ================================================================
+// Writes always go through GAS (keeps TEvo/Anthropic auth centralized).
+// Reads go direct: Terminal → Firestore REST API (sub-second, no GAS hop).
+//
+// Token lifecycle:
+//   First call → fetch token from GAS get_firebase_token
+//   Subsequent calls → use cached token
+//   Token expires → auto-refresh (55min cache, 60min actual)
+//
+// Usage:
+//   const snaps = await FS.getEventSnapshots('3082845', 50);
+//   const items = await FS.getFeedItems({league:'NBA', limit:100});
+//   const doc   = await FS.getDoc('event_index', '3082845');
+// ================================================================
+const FS = (() => {
+  let _token      = null;
+  let _projectId  = null;
+  let _expiresAt  = 0;
+
+  // ── Token management ───────────────────────────────────────────
+  async function getToken() {
+    if (_token && Date.now() < _expiresAt - 60000) return _token;
+    const d = await gasGet({action:'get_firebase_token'});
+    if (!d.ok) throw new Error(`Firebase token error: ${d.error}`);
+    _token     = d.token;
+    _projectId = d.project_id;
+    _expiresAt = new Date(d.expires_at).getTime();
+    return _token;
+  }
+
+  function baseUrl() {
+    return `https://firestore.googleapis.com/v1/projects/${_projectId}/databases/(default)/documents`;
+  }
+
+  // ── Raw Firestore value decoder ────────────────────────────────
+  function decodeValue(v) {
+    if (!v) return null;
+    if (v.stringValue  !== undefined) return v.stringValue;
+    if (v.integerValue !== undefined) return Number(v.integerValue);
+    if (v.doubleValue  !== undefined) return Number(v.doubleValue);
+    if (v.booleanValue !== undefined) return v.booleanValue;
+    if (v.nullValue    !== undefined) return null;
+    if (v.timestampValue !== undefined) return v.timestampValue;
+    if (v.arrayValue)  return (v.arrayValue.values||[]).map(decodeValue);
+    if (v.mapValue)    return decodeFields(v.mapValue.fields||{});
+    return null;
+  }
+
+  function decodeFields(fields) {
+    const out = {};
+    Object.entries(fields||{}).forEach(([k,v]) => { out[k] = decodeValue(v); });
+    return out;
+  }
+
+  function decodeDoc(raw) {
+    if (!raw || !raw.fields) return null;
+    const doc = decodeFields(raw.fields);
+    // Add Firestore doc ID as _id
+    if (raw.name) doc._id = raw.name.split('/').pop();
+    return doc;
+  }
+
+  // ── GET single document ────────────────────────────────────────
+  async function getDoc(collection, docId) {
+    const token = await getToken();
+    const url   = `${baseUrl()}/${collection}/${encodeURIComponent(docId)}`;
+    const r = await fetch(url, {headers:{Authorization:`Bearer ${token}`}});
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error(`Firestore GET ${collection}/${docId}: HTTP ${r.status}`);
+    return decodeDoc(await r.json());
+  }
+
+  // ── Structured query (POST :runQuery) ──────────────────────────
+  // filters: [{field, op, value}]  op = EQUAL | GREATER_THAN | LESS_THAN | etc.
+  // orderBy: [{field, dir}]        dir = ASCENDING | DESCENDING
+  async function query(collection, filters=[], orderBy=[], limit=100) {
+    const token = await getToken();
+    const url   = `${baseUrl()}:runQuery`;
+
+    const where = filters.length === 1
+      ? buildFilter(filters[0])
+      : {compositeFilter:{op:'AND', filters: filters.map(buildFilter)}};
+
+    const structuredQuery = {
+      from:  [{collectionId: collection}],
+      limit: {value: limit},
+    };
+    if (filters.length) structuredQuery.where  = where;
+    if (orderBy.length) structuredQuery.orderBy = orderBy.map(o=>({
+      field:{fieldPath:o.field}, direction:o.dir||'DESCENDING'
+    }));
+
+    const r = await fetch(url, {
+      method:  'POST',
+      headers: {Authorization:`Bearer ${token}`, 'Content-Type':'application/json'},
+      body:    JSON.stringify({structuredQuery})
+    });
+    if (!r.ok) throw new Error(`Firestore query ${collection}: HTTP ${r.status}`);
+    const results = await r.json();
+    return (Array.isArray(results) ? results : [results])
+      .filter(row => row.document)
+      .map(row => decodeDoc(row.document));
+  }
+
+  function buildFilter({field, op, value}) {
+    let fv;
+    if      (typeof value === 'string')  fv = {stringValue:  value};
+    else if (typeof value === 'number')  fv = {doubleValue:  value};
+    else if (typeof value === 'boolean') fv = {booleanValue: value};
+    else                                 fv = {nullValue:    'NULL_VALUE'};
+    return {fieldFilter:{field:{fieldPath:field}, op, value:fv}};
+  }
+
+  // ── Convenience methods ────────────────────────────────────────
+
+  // Latest N price snapshots for an event from tevo/ collection
+  async function getEventSnapshots(eventId, limit=100) {
+    return query('tevo',
+      [{field:'event_id', op:'EQUAL', value:String(eventId)}],
+      [{field:'snapshot_ts', dir:'DESCENDING'}],
+      limit
+    );
+  }
+
+  // Feed items from feed_items/ — filter by league, matched, or event
+  async function getFeedItems({league, matched, eventId, limit=150} = {}) {
+    const filters = [];
+    if (eventId) filters.push({field:'matched_event_id', op:'EQUAL', value:String(eventId)});
+    else if (matched) filters.push({field:'matched', op:'EQUAL', value:true});
+    else if (league && league !== 'all') filters.push({field:'league', op:'EQUAL', value:league});
+    return query('feed_items', filters, [{field:'received_ts', dir:'DESCENDING'}], limit);
+  }
+
+  // Event index doc — latest prices across all sources for one event
+  async function getEventIndex(eventId) {
+    return getDoc('event_index', String(eventId));
+  }
+
+  // ESPN feed items
+  async function getEspnItems({league, limit=100} = {}) {
+    const filters = league && league !== 'all'
+      ? [{field:'feed_league', op:'EQUAL', value:league}]
+      : [{field:'matched', op:'EQUAL', value:true}];
+    return query('espn_feed', filters, [{field:'received_ts', dir:'DESCENDING'}], limit);
+  }
+
+  // Connection test — reads the ping doc
+  async function testConnection() {
+    try {
+      const doc = await getDoc('_connection_test', 'ping');
+      return {ok: !!doc, doc};
+    } catch(e) {
+      return {ok: false, error: e.message};
+    }
+  }
+
+  return {getDoc, query, getEventSnapshots, getFeedItems,
+          getEventIndex, getEspnItems, testConnection, getToken};
+})();
 async function testConn(){
   const box=document.getElementById('conn-box'); box.style.display='block'; box.className='connbox'; box.textContent='TESTING...';
   try{
@@ -741,6 +912,27 @@ async function testConn(){
       localStorage.setItem(CKEY,JSON.stringify(c)); updateSrcBar(c);
     } else { box.textContent=`ERROR: ${d.error}`; box.className='connbox err'; }
   }catch(e){ box.textContent=`FAILED: ${e.message}`; box.className='connbox err'; }
+}
+
+async function testFirestore(){
+  const box=document.getElementById('fs-test-box');
+  box.style.display='block'; box.className='connbox'; box.textContent='TESTING FIRESTORE CONNECTION...';
+  try {
+    const result = await FS.testConnection();
+    if(result.ok) {
+      // Also count a few collections
+      const snaps = await FS.query('tevo',[],[{field:'snapshot_ts',dir:'DESCENDING'}],5);
+      const feeds = await FS.query('feed_items',[],[{field:'received_ts',dir:'DESCENDING'}],5);
+      box.textContent = `FIRESTORE CONNECTED ✓ · tevo/ (${snaps.length} recent) · feed_items/ (${feeds.length} recent)`;
+      box.className='connbox ok';
+    } else {
+      box.textContent = `FIRESTORE FAILED: ${result.error}`;
+      box.className='connbox err';
+    }
+  } catch(e) {
+    box.textContent = `FIRESTORE ERROR: ${e.message}`;
+    box.className='connbox err';
+  }
 }
 
 // ================================================================
@@ -765,12 +957,40 @@ let _nextUpdateMap = {}; // event_id → {mins_until_update, window_mins, next_u
 
 async function loadNextUpdateTimes(){
   try {
-    const d = await gasGet({action:'get_settings'});
-    if(d.ok && d.event_next_update){
-      _nextUpdateMap = d.event_next_update;
-      renderSidebar(); // re-render with timers
+    // Try Firestore event_index first — has last snapshot ts per event
+    const keys = Object.keys(tracked);
+    if (!keys.length) return;
+    for (const key of keys) {
+      const ev = tracked[key];
+      if (!ev || !ev.event_id) continue;
+      try {
+        const idx = await FS.getEventIndex(ev.event_id);
+        if (idx && idx.tevo_ts) {
+          const daysUntilN = ev.date
+            ? Math.max(0, (new Date(ev.date)-new Date())/864e5) : 999;
+          const windowMins = daysUntilN<=2 ? 15 : daysUntilN<=7 ? 30 : 240;
+          const nextTs     = new Date(new Date(idx.tevo_ts).getTime() + windowMins*60*1000);
+          const minsUntil  = Math.max(0, Math.round((nextTs-new Date())/60000));
+          _nextUpdateMap[String(ev.event_id)] = {
+            next_update_ts:    nextTs.toISOString(),
+            mins_until_update: minsUntil,
+            window_mins:       windowMins,
+            last_snapshot_ts:  idx.tevo_ts
+          };
+        }
+      } catch(e) {} // per-event failure is non-fatal
     }
-  } catch(e){}
+    renderSidebar();
+  } catch(e) {
+    // Fall back to GAS get_settings
+    try {
+      const d = await gasGet({action:'get_settings'});
+      if(d.ok && d.event_next_update) {
+        _nextUpdateMap = d.event_next_update;
+        renderSidebar();
+      }
+    } catch(e2) {}
+  }
 }
 
 function getNextUpdateLabel(eventId){
@@ -800,12 +1020,28 @@ async function loadTracked(){
 async function loadHistory(key){
   const ev=tracked[key]; if(!ev)return;
   try{
-    const d=await gasGet({action:'history',src:ev.src,event_id:ev.event_id});
-    // Filter bad snapshots on load — floor and avg must be valid positive numbers
-    ev.history=(d.rows||[])
-      .map(r=>({ts:r.snapshot_ts,floor:Math.round(Number(r.floor)||0),avg:Math.round(Number(r.avg)||0),median:Math.round(Number(r.median)||0),max:Math.round(Number(r.max)||0),count:Math.round(Number(r.count)||0)}))
-      .filter(s=>s.floor>0&&s.avg>0&&!isNaN(s.floor)&&!isNaN(s.avg));
-  }catch(e){ ev.history=[]; }
+    // Direct Firestore read — tevo/ collection, ordered by snapshot_ts
+    const snaps = await FS.getEventSnapshots(ev.event_id, 200);
+    ev.history = snaps
+      .map(s=>({
+        ts:     s.snapshot_ts||s.received_ts||'',
+        floor:  Math.round(Number(s.floor||0)),
+        avg:    Math.round(Number(s.avg||0)),
+        median: Math.round(Number(s.median||0)),
+        max:    Math.round(Number(s.max||0)),
+        count:  Math.round(Number(s.count||0))
+      }))
+      .filter(s=>s.floor>0 && s.avg>0 && !isNaN(s.floor))
+      .sort((a,b)=>a.ts.localeCompare(b.ts)); // oldest first for chart
+  }catch(e){
+    // Fallback to GAS if Firestore not yet configured
+    try{
+      const d=await gasGet({action:'history',src:ev.src,event_id:ev.event_id});
+      ev.history=(d.rows||[])
+        .map(r=>({ts:r.snapshot_ts,floor:Math.round(Number(r.floor)||0),avg:Math.round(Number(r.avg)||0),median:Math.round(Number(r.median)||0),max:Math.round(Number(r.max)||0),count:Math.round(Number(r.count)||0)}))
+        .filter(s=>s.floor>0&&s.avg>0&&!isNaN(s.floor)&&!isNaN(s.avg));
+    }catch(e2){ ev.history=[]; }
+  }
 }
 async function saveSnap(src,venue,perf,eid,name,date,stats,dataSource){
   const key = src==='TE' ? `TE::${eid}` : skey(src,venue,perf,eid);
@@ -1072,22 +1308,56 @@ async function fetchTE(eid,name,venue,perf,date){
 async function loadFeed(){
   const btn=document.getElementById('btn-feed-ref'); btn.disabled=true; btn.textContent='FETCHING...'; setSt('FETCHING LIVE FEED...');
   try{
-    const params={action:'get_rss_live',limit:150};
-    if(lfilt&&lfilt!=='all'&&lfilt!=='matched') params.league=lfilt;
-    const d=await gasGet(params);
+    // Direct Firestore read — feed_items/ collection
+    const opts = {limit:150};
+    if(lfilt && lfilt!=='all' && lfilt!=='matched') opts.league = lfilt;
+    if(lfilt==='matched') opts.matched = true;
+
+    let items;
+    try {
+      const docs = await FS.getFeedItems(opts);
+      items = docs.map(d=>({
+        title:    d.post_text||d.title||'',
+        link:     d.post_url||d.url||'',
+        desc:     d.post_full||d.description||'',
+        pubDate:  d.posted_at||d.received_ts||'',
+        source:   d.feed_name||d.feed_title||'',
+        author:   d.author_name||'',
+        handle:   d.author_handle||'',
+        league:   d.league||d.feed_league||'General',
+        impact:   d.impact||null,
+        category: d.attr_category||d.category||null,
+        reason:   d.reason||null,
+        matched:  d.matched||false,
+        event_id: d.matched_event_id||'',
+        event_name:d.matched_event_name||'',
+        price_floor:d.price_floor_at_match||0,
+        hashtags: d.attr_keywords||[]
+      }));
+    } catch(fsErr) {
+      // Fallback to GAS if Firestore token not available
+      const params={action:'get_rss_live',limit:150};
+      if(lfilt&&lfilt!=='all'&&lfilt!=='matched') params.league=lfilt;
+      const d=await gasGet(params);
+      items=(d.items||[]).map(i=>({
+        title:i.post_text||i.item_title||'', link:i.post_url||i.item_url||'',
+        desc:i.post_full||i.item_description||'',
+        pubDate:i.posted_at||i.item_published||i.received_ts||'',
+        source:i.feed_name||i.feed_title||'', author:i.author_name||'',
+        handle:i.author_handle||'', league:i.league||i.feed_league||'General',
+        impact:i.impact||null, category:i.attr_category||i.category||null,
+        reason:i.reason||null, matched:!!(i.matched_event_id),
+        event_id:i.matched_event_id||'', event_name:i.matched_event_name||'',
+        price_floor:i.price_floor_at_match||0, hashtags:[]
+      }));
+    }
+
     const prevCount=feedItems.length;
-    feedItems=(d.items||[]).map(i=>({
-      title:i.item_title||'', link:i.item_url||'', desc:i.item_description||'',
-      pubDate:i.item_published||i.received_ts||'', source:i.feed_title||'',
-      league:i.feed_league||'General', impact:i.impact||null,
-      category:i.category||null, reason:i.reason||null,
-      priority:i.reason||i.category||null  // 'matched' flag from webhook
-    }));
+    feedItems=items;
     const newCount=feedItems.length;
-    const matched=feedItems.filter(i=>i.priority==='matched'||i.category==='matched').length;
+    const matched=feedItems.filter(i=>i.matched||i.event_id).length;
     document.getElementById('feed-badge').textContent=`${newCount} ITEMS${matched?` · ${matched} MATCHED`:''}`;
     document.getElementById('feed-updated').textContent=`updated ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`;
-    // Bump nav badge if new items arrived while panel was hidden
     if(newCount>prevCount) bumpBadge('feed-badge',newCount-prevCount);
     newCount?renderFeed():document.getElementById('feed-list').innerHTML=`<div class="empty"><span style="font-size:16px;color:var(--border);">▬▬▬</span><span>NO ITEMS YET<span class="blink">_</span></span><span style="font-size:10px;">CREATE FEEDS IN MANAGE SOURCES · ITEMS ARRIVE VIA WEBHOOK</span></div>`;
     setSt('FEED READY');
@@ -1114,17 +1384,26 @@ function renderFeed(){
   const el=document.getElementById('feed-list');
   if(!items.length){el.innerHTML=`<div class="empty" style="height:200px;"><span style="color:var(--muted);font-size:11px;">NO ITEMS MATCH FILTER</span></div>`;return;}
   el.innerHTML=items.map(item=>{
-    const isMatched=item.category==='matched'||item.reason==='matched'||item.priority==='matched';
+    const isMatched = item.matched || !!(item.event_id);
+    const authorStr = item.handle ? `${item.handle}` : item.source||'';
+    const priceStr  = item.price_floor>0 ? `<span style="font-size:9px;color:var(--cyan);margin-left:6px;">$${item.price_floor} at arrival</span>` : '';
+    const eventStr  = item.event_name ? `<span style="font-size:9px;color:var(--amber);margin-left:6px;">→ ${item.event_name.substring(0,30)}</span>` : '';
     return`<div class="fi" style="${isMatched?'border-left:3px solid var(--rss);':''}" onclick="${item.link?`window.open('${item.link.replace(/'/g,'')}','_blank')`:''}">
       <div class="fi-top">
         <div class="fi-title">${item.title}</div>
         ${item.impact?`<span class="fi-imp ${item.impact}">${item.impact.toUpperCase()}</span>`:''}
         ${isMatched?`<span style="font-size:9px;padding:1px 5px;border:1px solid var(--rss);color:var(--rss);margin-left:4px;">MATCHED</span>`:''}
       </div>
-      <div class="fi-meta"><span class="fi-src">${item.source}</span><span class="fi-tag">${item.league}</span>${item.category&&item.category!=='matched'?`<span class="fi-tag" style="color:var(--purple);border-color:var(--purple);">${item.category}</span>`:''}<span class="fi-time">${ago(item.pubDate)}</span></div>
-      ${item.desc?`<div class="fi-desc">${item.desc.substring(0,120)}${item.desc.length>120?'...':''}</div>`:''}
+      <div class="fi-meta">
+        <span class="fi-src">${authorStr}</span>
+        <span class="fi-tag">${item.league}</span>
+        ${item.category&&item.category!=='matched'?`<span class="fi-tag" style="color:var(--purple);border-color:var(--purple);">${item.category}</span>`:''}
+        <span class="fi-time">${ago(item.pubDate)}</span>
+        ${priceStr}${eventStr}
+      </div>
+      ${item.desc&&item.desc!==item.title?`<div class="fi-desc">${item.desc.substring(0,140)}${item.desc.length>140?'...':''}</div>`:''}
       ${item.reason&&item.reason!=='matched'?`<div class="fi-reason">${item.reason}</div>`:''}
-      <div style="margin-top:6px;"><button onclick="event.stopPropagation();feedToChat('${(item.title||'').replace(/'/g,'').replace(/"/g,'').substring(0,80)}','${item.source||''}')" style="font-size:9px;padding:2px 8px;border:1px solid var(--purple);color:var(--purple);background:transparent;cursor:pointer;font-family:var(--font);">ASK AI ↗</button></div>
+      <div style="margin-top:6px;"><button onclick="event.stopPropagation();feedToChat('${(item.title||'').replace(/'/g,'').replace(/"/g,'').substring(0,80)}','${authorStr}')" style="font-size:9px;padding:2px 8px;border:1px solid var(--purple);color:var(--purple);background:transparent;cursor:pointer;font-family:var(--font);">ASK AI ↗</button></div>
     </div>`;
   }).join('');
 }

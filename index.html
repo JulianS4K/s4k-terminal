@@ -760,9 +760,27 @@ function skey(src,v,p,eid){
 }
 function ago(ds){ const d=new Date(ds),m=Math.round((Date.now()-d)/60000); if(m<1)return'just now'; if(m<60)return`${m}m ago`; if(m<1440)return`${Math.round(m/60)}h ago`; return`${Math.round(m/1440)}d ago`; }
 
-// ================================================================
-// F1 — TRACKED EVENTS + DETAIL
-// ================================================================
+// Next-update timers — loaded from GAS get_settings
+let _nextUpdateMap = {}; // event_id → {mins_until_update, window_mins, next_update_ts}
+
+async function loadNextUpdateTimes(){
+  try {
+    const d = await gasGet({action:'get_settings'});
+    if(d.ok && d.event_next_update){
+      _nextUpdateMap = d.event_next_update;
+      renderSidebar(); // re-render with timers
+    }
+  } catch(e){}
+}
+
+function getNextUpdateLabel(eventId){
+  const info = _nextUpdateMap[String(eventId)];
+  if(!info) return '';
+  const mins = info.mins_until_update;
+  if(mins<=0)  return '<span style="color:var(--green);font-size:9px;">UPDATE DUE</span>';
+  if(mins< 60) return `<span style="color:var(--muted);font-size:9px;">↻ ${mins}m</span>`;
+  return `<span style="color:var(--muted);font-size:9px;">↻ ${Math.round(mins/60)}h</span>`;
+}
 async function loadTracked(){
   setSt('LOADING...');
   try{
@@ -826,7 +844,8 @@ function renderSidebar(){
     const h=(r.history||[]).filter(s=>s.floor>0&&!isNaN(s.floor)&&s.avg>0&&!isNaN(s.avg));
     if(!h.length) return`<div class="er src-${r.src.toLowerCase()}${k===selKey?' active':''}" onclick="selectEvent('${k}')"><div style="display:flex;justify-content:space-between;"><div class="er-name">${r.name}</div><span class="spill ${r.src.toLowerCase()}">${r.src}</span></div><div class="er-meta">${(r.venue||'').replace(/_/g,' ').substring(0,26)}</div><div class="er-r2"><span style="color:var(--muted);font-size:10px;">LOADING...</span></div></div>`;
     const lat=h[h.length-1],prev=h.length>1?h[h.length-2]:null,fd=prev?lat.floor-prev.floor:0;
-    return`<div class="er src-${r.src.toLowerCase()}${k===selKey?' active':''}" onclick="selectEvent('${k}')"><div style="display:flex;justify-content:space-between;align-items:flex-start;"><div class="er-name" title="${r.name}">${r.name}</div><span class="spill ${r.src.toLowerCase()}">${r.src}</span></div><div class="er-meta">${(r.venue||'').replace(/_/g,' ').substring(0,26)}</div><div class="er-r2"><span class="er-floor">${fmt(lat.floor)}</span><span style="font-size:10px;">${dHtml(fd,false)}</span><span class="sct">${h.length}×</span><span class="elst"><span>${fmtC(lat.count)}</span> LST</span></div></div>`;
+    const nextUpd = getNextUpdateLabel(r.event_id||'');
+    return`<div class="er src-${r.src.toLowerCase()}${k===selKey?' active':''}" onclick="selectEvent('${k}')"><div style="display:flex;justify-content:space-between;align-items:flex-start;"><div class="er-name" title="${r.name}">${r.name}</div><span class="spill ${r.src.toLowerCase()}">${r.src}</span></div><div class="er-meta">${(r.venue||'').replace(/_/g,' ').substring(0,26)}</div><div class="er-r2"><span class="er-floor">${fmt(lat.floor)}</span><span style="font-size:10px;">${dHtml(fd,false)}</span><span class="sct">${h.length}×</span><span class="elst"><span>${fmtC(lat.count)}</span> LST</span>${nextUpd}</div></div>`;
   }).join('');
 }
 function selectEvent(key){ selKey=key; renderSidebar(); renderDetail(key); showPanel('detail',document.querySelectorAll('.fkey')[0]); }
@@ -970,27 +989,42 @@ async function removeSelected(){
   ['m-f','m-a','m-m','m-x','m-c'].forEach(id=>{document.getElementById(id).textContent='—';document.getElementById(id+'d').textContent='—';});
   if(chart){chart.destroy();chart=null;} toast('REMOVED'); setSt('READY');
 }
+// Manual refresh rate limit — 5 minutes between manual triggers
+const MANUAL_REFRESH_LIMIT_MS = 5 * 60 * 1000;
+let _lastManualRefresh = 0;
+
 async function refreshAll(el){
   const keys=Object.keys(tracked); if(!keys.length){toast('NOTHING TO REFRESH','err');return;}
+
+  // Rate limit check
+  const now = Date.now();
+  const msSinceLast = now - _lastManualRefresh;
+  if(_lastManualRefresh > 0 && msSinceLast < MANUAL_REFRESH_LIMIT_MS){
+    const secsLeft = Math.ceil((MANUAL_REFRESH_LIMIT_MS - msSinceLast) / 1000);
+    const minsLeft = Math.ceil(secsLeft / 60);
+    toast(`SLOW DOWN — next refresh in ${minsLeft}m ${secsLeft%60}s`,'err');
+    return;
+  }
+  _lastManualRefresh = now;
+
   if(el){ el.textContent='REFRESHING...'; el.style.pointerEvents='none'; }
   setSt('REFRESHING ALL TRACKED EVENTS...');
   try{
-    // Call GAS to run full refresh server-side (same as hourly trigger)
     const d=await gasPost({action:'refresh_all'});
     if(d.ok){
       await loadTracked();
       renderSidebar(); renderF4Portfolio();
-      await loadIntelFeed(); // pick up new KPI brief
+      await loadIntelFeed();
       toast(`REFRESHED: ${d.count||keys.length} events`);
       setSt(`REFRESHED ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`);
+      // Update next-update timers after refresh
+      loadNextUpdateTimes();
     } else {
-      // Fallback: refresh individually client-side
       for(const k of keys){selKey=k;await refreshSelected();}
       if(keys.length) selectEvent(keys[keys.length-1]);
       toast(`${keys.length} REFRESHED`); setSt('REFRESH COMPLETE');
     }
   }catch(e){
-    // Fallback on error
     for(const k of keys){selKey=k;await refreshSelected();}
     toast(`${keys.length} REFRESHED`); setSt('REFRESH COMPLETE');
   }
@@ -1896,11 +1930,12 @@ async function init(){
     // Default to F6 chat with tutorial
     showPanel('intel', document.getElementById('fkey-intel'));
     switchIntelTab('chat', document.getElementById('itab-chat'));
-    // Defer tutorial until after panel is fully rendered
     setTimeout(showTutorial, 150);
     startSnapshotPoll();
+    loadNextUpdateTimes();
     gasGet({action:'get_settings'}).then(d=>{
       if(d.ok&&d.last_auto_refresh) lastSnapshotTs=d.last_auto_refresh;
+      if(d.ok&&d.event_next_update) { _nextUpdateMap=d.event_next_update; renderSidebar(); }
     }).catch(()=>{});
   } else {
     // No GAS URL yet — open to F8 settings

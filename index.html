@@ -692,7 +692,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // STATE
 // ================================================================
 const CKEY='s4k_v526', TKEY='s4k_theme_v1';
-const APP_VERSION='Alpha 1.8'; // single source of truth — update on every release
+const APP_VERSION='Alpha 1.9'; // single source of truth — update on every release
 // Migrate GAS URL from any previous CKEY version so users don't lose settings on version bump
 (function migrateCreds(){
   if(localStorage.getItem(CKEY)) return; // already on current version
@@ -1399,7 +1399,21 @@ function switchMode(mode,el){ cmode=mode; document.querySelectorAll('.ctab').for
 function renderChart(r){
   const canvas=document.getElementById('main-ch'),empty=document.getElementById('empty-ch');
   const h=(r.history||[]).filter(s=>s.floor>0&&!isNaN(s.floor));
-  if(!h.length){canvas.style.display='none';empty.style.display='flex';return;}
+  if(!h.length){
+    canvas.style.display='none';
+    empty.style.display='flex';
+    // Show diagnostic — why is there no data?
+    const snapCount = (r.history||[]).length;
+    const badSnaps  = (r.history||[]).filter(s=>!(s.floor>0)).length;
+    const msg = snapCount===0
+      ? 'NO SNAPSHOTS YET — GAS trigger will write data every 5-15 min'
+      : `${snapCount} SNAPSHOT${snapCount!==1?'S':''} FILTERED — floor must be > $0 (${badSnaps} invalid)`;
+    const msgEl = empty.querySelector('span:nth-child(3)');
+    if(msgEl) msgEl.textContent = msg;
+    return;
+  }
+  // Single data point — show as large dot instead of line
+  const singlePoint = h.length === 1;
   canvas.style.display='block';empty.style.display='none';
   const labels=h.map(s=>{const d=new Date(s.ts);return`${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;});
   if(chart){chart.destroy();chart=null;}
@@ -1463,11 +1477,13 @@ function renderChart(r){
   if(cmode==='price'){
     base.scales.y.ticks.callback=v=>'$'+v.toLocaleString();
     base.plugins.tooltip.callbacks.label=ctx=>` ${ctx.dataset.label}: $${ctx.parsed.y.toLocaleString()}`;
+    // Single data point: increase point radius so it's visible as a dot
+    const pr = singlePoint ? 8 : 4;
     const ds=[];
-    if(son.floor)ds.push({label:'FLOOR',data:h.map(s=>s.floor),borderColor:'#00E5FF',backgroundColor:'rgba(0,229,255,0.05)',tension:0.3,pointRadius:4,fill:true,borderWidth:1.5});
-    if(son.med)  ds.push({label:'MEDIAN',data:h.map(s=>s.median),borderColor:'#CE93D8',backgroundColor:'rgba(206,147,216,0.05)',tension:0.3,pointRadius:4,fill:!son.floor,borderWidth:2});
-    if(son.avg)  ds.push({label:'AVG',data:h.map(s=>s.avg),borderColor:'#FFB300',tension:0.3,pointRadius:3,fill:false,borderWidth:1.5,borderDash:[4,3]});
-    if(son.max)  ds.push({label:'MAX',data:h.map(s=>s.max),borderColor:'#FF1744',tension:0.3,pointRadius:3,fill:false,borderWidth:1,borderDash:[2,4]});
+    if(son.floor)ds.push({label:'FLOOR',data:h.map(s=>s.floor),borderColor:'#00E5FF',backgroundColor:'rgba(0,229,255,0.05)',tension:0.3,pointRadius:pr,fill:true,borderWidth:1.5,spanGaps:true});
+    if(son.med)  ds.push({label:'MEDIAN',data:h.map(s=>s.median),borderColor:'#CE93D8',backgroundColor:'rgba(206,147,216,0.05)',tension:0.3,pointRadius:pr,fill:!son.floor,borderWidth:2,spanGaps:true});
+    if(son.avg)  ds.push({label:'AVG',data:h.map(s=>s.avg),borderColor:'#FFB300',tension:0.3,pointRadius:singlePoint?8:3,fill:false,borderWidth:1.5,borderDash:singlePoint?[]:[4,3],spanGaps:true});
+    if(son.max)  ds.push({label:'MAX',data:h.map(s=>s.max),borderColor:'#FF1744',tension:0.3,pointRadius:singlePoint?8:3,fill:false,borderWidth:1,borderDash:singlePoint?[]:[2,4],spanGaps:true});
     // Feed marker overlay dataset
     if(feedMarkers.length){
       ds.push({
@@ -1485,7 +1501,7 @@ function renderChart(r){
         }),
         pointBorderColor:'transparent',
         showLine:false,
-        order:0  // render on top
+        order:0
       });
     }
     chart=new Chart(canvas,{type:'line',data:{labels,datasets:ds},options:base});
@@ -1767,9 +1783,15 @@ async function scoreLiveFeed(){
 
 function setLF(l,el){
   lfilt=l;
-  // Clear all pill active states
   document.querySelectorAll('.feed-bar .fpill').forEach(p=>p.classList.remove('active'));
   el.classList.add('active');
+  const sub = document.getElementById('feed-subtitle');
+  if(sub){
+    if(l==='event' && selKey && tracked[selKey]) sub.textContent = `Showing: ${tracked[selKey].name} — last 14 days`;
+    else if(l==='matched') sub.textContent = 'Showing: items matched to tracked events';
+    else if(l==='all') sub.textContent = 'X/Twitter + ESPN merged · filter by league or event';
+    else sub.textContent = `Showing: ${l} · X/Twitter + ESPN`;
+  }
   renderFeed();
 }
 function setIF(i,el){
@@ -1882,7 +1904,7 @@ function renderFeed(){
         });
       }
     }
-    else items=items.filter(i=>i.league===lfilt||(i.league||'').toLowerCase()===lfilt.toLowerCase());
+    else items=items.filter(i=>(i.league||'').toLowerCase()===lfilt.toLowerCase());
   }
 
   if(ifilt) items=items.filter(i=>i.impact===ifilt);
@@ -1926,6 +1948,10 @@ function feedToChat(title, source){
   const chatEl=document.getElementById('chat-messages');
   chatEl.scrollTop=chatEl.scrollHeight;
   toast('FEED ITEM SENT TO CHAT');
+}
+function startFeedPoll(){
+  stopFeedPoll();
+  feedPollTimer = setInterval(loadFeed, 2*60*1000); // refresh feed every 2 min while F4 open
 }
 function stopFeedPoll(){ if(feedPollTimer){clearInterval(feedPollTimer);feedPollTimer=null;} }
 

@@ -674,7 +674,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // STATE
 // ================================================================
 const CKEY='s4k_v526', TKEY='s4k_theme_v1';
-const APP_VERSION='Alpha 1.3'; // single source of truth — update on every release
+const APP_VERSION='Alpha 1.4'; // single source of truth — update on every release
 // Migrate GAS URL from any previous CKEY version so users don't lose settings on version bump
 (function migrateCreds(){
   if(localStorage.getItem(CKEY)) return; // already on current version
@@ -1013,6 +1013,24 @@ function getNextUpdateLabel(eventId){
 async function loadTracked(){
   setSt('LOADING...');
   try{
+    // ── Show cached data immediately if available ─────────────────
+    // sessionStorage survives page refresh but not tab close.
+    // Lets the sidebar render in ~0ms while fresh data loads in background.
+    const CACHE_KEY = 's4k_tracked_cache';
+    const cached = sessionStorage.getItem(CACHE_KEY);
+    if(cached){
+      try{
+        const cachedEvents = JSON.parse(cached);
+        tracked={};
+        cachedEvents.forEach(ev=>{
+          const key = ev.src==='TE'&&ev.event_id ? `TE::${ev.event_id}` : ev.key;
+          tracked[key]={...ev, key, history:[]};
+        });
+        renderSidebar(); updateTotal(); setSt('UPDATING...');
+      }catch(e){}
+    }
+
+    // ── Fetch fresh data from GAS ─────────────────────────────────
     const d=await gasGet({action:'tracked'});
     tracked={};
     (d.events||[]).forEach(ev=>{
@@ -1021,25 +1039,39 @@ async function loadTracked(){
       if(!alreadyHas) tracked[canonicalKey]={...ev, key:canonicalKey, history:[]};
     });
 
-    // Load all histories — try Firestore batch first, fall back to sequential GAS
-    await loadAllHistories();
-    renderSidebar(); updateTotal(); setSt('READY');
+    // Cache the event list (without history) for next load
+    try{
+      sessionStorage.setItem(CACHE_KEY, JSON.stringify(
+        Object.values(tracked).map(({history:_, ...ev})=>ev)
+      ));
+    }catch(e){}
 
-    // Start real-time listener after initial load
-    startRealtimeListener();
+    // Render sidebar immediately with event names — don't wait for price data
+    renderSidebar(); updateTotal(); setSt('LOADING PRICES...');
+
+    // Pre-fetch Firebase token once — avoids N simultaneous token requests
+    try { await FS.getToken(); } catch(e) {}
+
+    // Load all histories in parallel — each updates sidebar as it arrives
+    loadAllHistories().then(() => {
+      renderSidebar(); updateTotal(); setSt('READY');
+      startRealtimeListener();
+    }).catch(() => setSt('READY'));
+
   }catch(e){ setSt('ADD GAS URL IN F8'); }
 }
 
-// Load histories for all tracked events in parallel
+// Load histories for all tracked events in parallel.
+// Each event updates the sidebar incrementally as its data arrives.
 async function loadAllHistories(){
   const keys = Object.keys(tracked);
   if(!keys.length) return;
-
-  // Try Firestore batch — query tevo/ for all event IDs at once
-  // Firestore doesn't support IN queries on REST without indexes, so
-  // fire parallel queries (one per event, non-blocking)
-  const promises = keys.map(k => loadHistory(k));
-  await Promise.allSettled(promises); // allSettled = never throws, all run
+  await Promise.allSettled(
+    keys.map(async k => {
+      await loadHistory(k);
+      renderSidebar(); // update this event's card as soon as its data lands
+    })
+  );
 }
 async function loadHistory(key){
   const ev=tracked[key]; if(!ev) return;

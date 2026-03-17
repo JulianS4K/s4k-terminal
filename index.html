@@ -674,7 +674,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // STATE
 // ================================================================
 const CKEY='s4k_v526', TKEY='s4k_theme_v1';
-const APP_VERSION='Alpha 1.4'; // single source of truth — update on every release
+const APP_VERSION='Alpha 1.5'; // single source of truth — update on every release
 // Migrate GAS URL from any previous CKEY version so users don't lose settings on version bump
 (function migrateCreds(){
   if(localStorage.getItem(CKEY)) return; // already on current version
@@ -948,7 +948,31 @@ async function testFirestore(){
 // HELPERS
 // ================================================================
 function calcStats(p){ if(!p.length)return{floor:0,max:0,avg:0,median:0,count:0};const s=[...p].sort((a,b)=>a-b);const sum=s.reduce((a,b)=>a+b,0);const mid=Math.floor(s.length/2);return{floor:s[0],max:s[s.length-1],avg:Math.round(sum/s.length),median:s.length%2===0?Math.round((s[mid-1]+s[mid])/2):s[mid],count:s.length}; }
-function daysUntil(d){ if(!d)return null; return Math.max(0,Math.round((new Date(d)-new Date())/864e5)); }
+function daysUntil(d){ if(!d)return null; const dt=new Date(d); if(isNaN(dt))return null; return Math.max(0,Math.round((dt-new Date())/864e5)); }
+
+// Safe date formatter — handles ISO strings, GAS Date serializations,
+// spreadsheet serial numbers, and anything else without throwing
+function safeDate(d, opts){
+  if(!d) return '';
+  // Try parsing as-is first
+  let dt = new Date(d);
+  // GAS sometimes returns dates as "Mon Apr 03 2026 19:30:00 GMT+0000 (UTC)"
+  // If that fails try extracting numbers
+  if(isNaN(dt.getTime())){
+    // Try numeric serial (Excel/Sheets date number)
+    const n = Number(d);
+    if(!isNaN(n) && n > 40000 && n < 60000) {
+      // Sheets serial: days since Dec 30 1899
+      dt = new Date(Date.UTC(1899,11,30) + n*86400000);
+    }
+  }
+  if(isNaN(dt.getTime())) return 'TBD';
+  return dt.toLocaleDateString('en-US', opts || {weekday:'short',month:'short',day:'numeric',year:'numeric'});
+}
+
+function safeDateFull(d){
+  return safeDate(d, {weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+}
 function dayOfWeek(d){ if(!d)return''; return['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(d).getDay()]; }
 function fmt(n){ return n>=1000?'$'+Number(n).toLocaleString():'$'+n; }
 function fmtC(n){ return Number(n).toLocaleString(); }
@@ -1090,6 +1114,12 @@ async function loadHistory(key){
           count:  Math.round(Number(s.count||0))
         }))
         .filter(s=>s.floor>0 && s.avg>0 && !isNaN(s.floor))
+        .map(s=>({
+          ...s,
+          // Cap max at 20x floor — anything higher is a data anomaly
+          // (parking tickets, premium packages mixed in)
+          max: s.max > s.floor * 20 ? s.avg * 3 : s.max
+        }))
         .sort((a,b)=>a.ts.localeCompare(b.ts));
       loaded = true;
     }
@@ -1300,7 +1330,7 @@ function buildFallbackMarkers(ev) {
   const lbl=document.getElementById('det-blbl'); lbl.textContent=isSG?'SEATGEEK':'TICKET EVOLUTION'; lbl.className=`blbl ${isSG?'sg':'te'}`;
   document.getElementById('det-bmeta').textContent=isSG?'Listings API v2 · via GAS':'Listings v9 · HMAC via GAS';
   document.getElementById('det-title').textContent=r.name;
-  document.getElementById('det-meta').textContent=`${(r.venue||'').replace(/_/g,' ')} · ${(r.performer||'').replace(/_/g,' ')}${r.date?' · '+new Date(r.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):''}`;
+  document.getElementById('det-meta').textContent=`${(r.venue||'').replace(/_/g,' ')} · ${(r.performer||'').replace(/_/g,' ')}${r.date?' · '+safeDate(r.date):''}`;
   const pill=document.getElementById('lst-pill'),pd=document.getElementById('lst-delta');
   if(lat){
     pill.style.display='inline-block'; pill.textContent=`${fmtC(lat.count)} LST`;
@@ -1504,7 +1534,7 @@ async function searchTE(){
     if(!d.events?.length){st.textContent='NO EVENTS FOUND';st.style.color='var(--red)';return;}
     st.textContent=`${d.events.length} RESULTS — SELECT ONE`; st.style.color='var(--green)';
     dd.style.display='block';
-    dd.innerHTML=d.events.map(ev=>`<div class="ddi" onclick="fetchTE('${ev.id}','${(ev.name||'').replace(/['"]/g,'')}','${(ev.venue?.name||'UNKNOWN').replace(/['"]/g,'')}','${(ev.performances?.[0]?.performer?.name||'UNKNOWN').replace(/['"]/g,'')}','${ev.occurs_at||''}')"><div class="ddn2">${ev.name||'UNNAMED'}</div><div class="ddm">${ev.venue?.name||''} · ${ev.occurs_at?new Date(ev.occurs_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):''}</div></div>`).join('');
+    dd.innerHTML=d.events.map(ev=>`<div class="ddi" onclick="fetchTE('${ev.id}','${(ev.name||'').replace(/['"]/g,'')}','${(ev.venue?.name||'UNKNOWN').replace(/['"]/g,'')}','${(ev.performances?.[0]?.performer?.name||'UNKNOWN').replace(/['"]/g,'')}','${ev.occurs_at||''}')"><div class="ddn2">${ev.name||'UNNAMED'}</div><div class="ddm">${ev.venue?.name||''} · ${ev.occurs_at?safeDate(ev.occurs_at,{month:'short',day:'numeric',year:'numeric'}):''}</div></div>`).join('');
   }catch(e){st.textContent=`FAILED: ${e.message}`;st.style.color='var(--red)';}
 }
 async function fetchTE(eid,name,venue,perf,date){
@@ -1795,7 +1825,7 @@ function appendEventCards(events, listingsFound){
     chatEventStore[String(ev.id)] = ev;
 
     const card=document.createElement('div'); card.className='te-event-card';
-    const dateStr=(ev.date_local||ev.date)?new Date(ev.date_local||ev.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',weekday:'short'}):'TBD';
+    const dateStr=(ev.date_local||ev.date)?safeDate(ev.date_local||ev.date,{month:'short',day:'numeric',year:'numeric',weekday:'short'}):'TBD';
     const isTracked=trackedIds.has(String(ev.id));
     const lst=listingsMap[String(ev.id)];
     const avail=ev.available_count||0;
@@ -1949,7 +1979,7 @@ async function trackFromChat(eid){
 
     // Build single unified reply
     const lines = [];
-    const dateStr = ev.date ? new Date(ev.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+    const dateStr = ev.date ? safeDateFull(ev.date) : '';
     lines.push(`**${ev.name}** — Now tracking`);
     lines.push(`${ev.venue}${ev.venue_city?', '+ev.venue_city:''} · ${dateStr}`);
 
@@ -2030,7 +2060,7 @@ async function fetchChatListings(eid){
       const s=d.stats, w=d.wholesale_stats||{};
       const srcLabel=d.source_label||(d.source==='listings'?'TEvo Live':'TEvo Stats');
       const lines=[];
-      const dateStr=ev.date?new Date(ev.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+      const dateStr=ev.date?safeDateFull(ev.date):'';
       lines.push(`**${ev.name}**`);
       lines.push(`${ev.venue}${ev.venue_city?', '+ev.venue_city:''} · ${dateStr}`);
       lines.push('');
@@ -2359,7 +2389,7 @@ function renderF4Portfolio(){
       const prev=hist.length>1?hist[hist.length-2]:null;
       const fd=lat&&prev?lat.floor-prev.floor:null;
       const cd=lat&&prev?lat.count-prev.count:null;
-      const dateStr=ev.date?new Date(ev.date).toLocaleDateString('en-US',{month:'short',day:'numeric'}):''
+      const dateStr=ev.date?safeDate(ev.date,{month:'short',day:'numeric'}):''
       return `<div style="padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <div style="flex:1;min-width:120px;">
           <div style="font-size:10px;color:var(--white);line-height:1.3;">${(ev.name||ev.event_name||'').substring(0,40)}</div>

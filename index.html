@@ -1810,13 +1810,30 @@ async function refreshSelected(){
   if(!selKey) return;
   const r=tracked[selKey]; if(!r) return;
   if(r.src==='SG'){ toast('SeatGeek disabled — remove and re-add via TEvo','err'); return; }
-  setSt(`REFRESHING ${r.name}...`);
-  // Fetch fresh live snapshot (writes new row to Sheets + Firestore)
-  await fetchTE(r.event_id, r.name, r.venue, r.performer, r.date);
-  // Reload full history so chart shows ALL data points not just the new one
-  await loadHistory(selKey);
-  renderDetail(selKey);
-  setSt('READY');
+
+  const btn = document.getElementById('btn-ref');
+  btn.disabled = true; btn.textContent = 'REFRESHING...';
+  setSt(`Refreshing ${r.name}...`);
+
+  try {
+    // 1. Fetch live data from TEvo → writes to Sheets + Firestore via GAS
+    await fetchTE(r.event_id, r.name, r.venue, r.performer, r.date);
+
+    // 2. Reload full history — gets ALL snapshots including the new one
+    await loadHistory(selKey);
+
+    // 3. Re-render chart and metric cards
+    if(selKey) {
+      renderDetail(selKey);
+      renderChart(tracked[selKey]);
+    }
+    setSt('READY');
+  } catch(e) {
+    toast(`REFRESH FAILED: ${e.message}`, 'err');
+    setSt('READY');
+  } finally {
+    btn.disabled = false; btn.textContent = 'REFRESH';
+  }
 }
 async function removeSelected(){
   if(!selKey)return; try{await gasPost({action:'untrack',key:selKey});}catch(e){}

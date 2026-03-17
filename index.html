@@ -2,8 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>S4K Terminal</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#080C0A">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="S4K Terminal">
+<meta name="description" content="S4K Entertainment — Ticket Market Analytics Terminal">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<title>S4K Terminal · Ticket Market Analytics v5.5.4</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&display=swap');
@@ -270,7 +277,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 <div class="terminal">
 
 <div class="topbar">
-  <span id="term-title" style="font-size:13px;font-weight:600;letter-spacing:0.1em;">S4K TERMINAL <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.5</span></span>
+  <span id="term-title" style="font-size:13px;font-weight:600;letter-spacing:0.1em;">S4K TERMINAL <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.2.6</span></span>
   <div style="display:flex;gap:16px;"><span id="clock"></span><span>NYC</span></div>
 </div>
 
@@ -444,7 +451,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
         <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></div>TERMINAL NAME</div>
         <div class="ifield" style="max-width:300px;"><div class="ilbl">DISPLAY NAME</div><input class="tminput" id="term-name" placeholder="S4K TERMINAL" oninput="applyTermName(this.value)"/></div>
         <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></div>MARQUEE <span style="font-size:9px;color:var(--muted);margin-left:6px;">PEAK INTERNET</span></div>
-        <div class="ifield" style="max-width:420px;"><div class="ilbl">SCROLLING MESSAGE (blank to disable)</div><input class="tminput" id="marquee-text" placeholder="S4K TERMINAL · TICKET MARKET ANALYTICS v5.5 · " oninput="applyMarquee(this.value)"/></div>
+        <div class="ifield" style="max-width:420px;"><div class="ilbl">SCROLLING MESSAGE (blank to disable)</div><input class="tminput" id="marquee-text" placeholder="S4K TERMINAL · TICKET MARKET ANALYTICS v5.2.6 · " oninput="applyMarquee(this.value)"/></div>
         <div id="marquee-preview" style="display:none;overflow:hidden;border:1px solid var(--border);padding:4px 0;margin-top:8px;background:var(--bg2);"><div id="marquee-inner" style="white-space:nowrap;font-size:10px;color:var(--amber);animation:marquee 12s linear infinite;display:inline-block;padding-left:100%;"></div></div>
       </div>
     </div>
@@ -679,7 +686,12 @@ function dayOfWeek(d){ if(!d)return''; return['Sun','Mon','Tue','Wed','Thu','Fri
 function fmt(n){ return n>=1000?'$'+Number(n).toLocaleString():'$'+n; }
 function fmtC(n){ return Number(n).toLocaleString(); }
 function dHtml(n,isC){ if(!n||n===0)return'<span style="color:var(--muted)">—</span>'; const a=Math.abs(n),s=isC?a.toLocaleString():'$'+a.toLocaleString(); return n>0?`<span class="dup">▲ ${s}</span>`:`<span class="ddn">▼ ${s}</span>`; }
-function skey(src,v,p,eid){ return`${src}::${(v||'').replace(/[^\w]/g,'_').substring(0,30)}::${(p||'').replace(/[^\w]/g,'_').substring(0,30)}::${eid||''}`.replace(/::$/,''); }
+function skey(src,v,p,eid){
+  // TEvo events: key by event_id only — guaranteed unique, prevents venue/performer string variance duplicates
+  if(src==='TE'&&eid) return `TE::${eid}`;
+  // SeatGeek: keep venue+performer+id composite key
+  return`${src}::${(v||'').replace(/[^\w]/g,'_').substring(0,30)}::${(p||'').replace(/[^\w]/g,'_').substring(0,30)}::${eid||''}`.replace(/::$/,'');
+}
 function ago(ds){ const d=new Date(ds),m=Math.round((Date.now()-d)/60000); if(m<1)return'just now'; if(m<60)return`${m}m ago`; if(m<1440)return`${Math.round(m/60)}h ago`; return`${Math.round(m/1440)}d ago`; }
 
 // ================================================================
@@ -687,25 +699,55 @@ function ago(ds){ const d=new Date(ds),m=Math.round((Date.now()-d)/60000); if(m<
 // ================================================================
 async function loadTracked(){
   setSt('LOADING...');
-  try{ const d=await gasGet({action:'tracked'}); tracked={}; (d.events||[]).forEach(ev=>{tracked[ev.key]={...ev,history:[]};});
+  try{
+    const d=await gasGet({action:'tracked'});
+    tracked={};
+    (d.events||[]).forEach(ev=>{
+      // Always use canonical key regardless of what's stored
+      const canonicalKey = ev.src==='TE'&&ev.event_id ? `TE::${ev.event_id}` : ev.key;
+      // Deduplicate in memory — if event_id already exists, skip
+      const alreadyHas = ev.src==='TE' && Object.values(tracked).some(t=>String(t.event_id)===String(ev.event_id));
+      if(!alreadyHas) tracked[canonicalKey]={...ev, key:canonicalKey, history:[]};
+    });
     for(const k of Object.keys(tracked)) await loadHistory(k);
     renderSidebar(); updateTotal(); setSt('READY');
   }catch(e){ setSt('ADD GAS URL IN F8'); }
 }
 async function loadHistory(key){
   const ev=tracked[key]; if(!ev)return;
-  try{ const d=await gasGet({action:'history',src:ev.src,event_id:ev.event_id}); ev.history=(d.rows||[]).map(r=>({ts:r.snapshot_ts,floor:Number(r.floor),avg:Number(r.avg),median:Number(r.median),max:Number(r.max),count:Number(r.count)})); }
-  catch(e){ ev.history=[]; }
+  try{
+    const d=await gasGet({action:'history',src:ev.src,event_id:ev.event_id});
+    // Filter bad snapshots on load — floor and avg must be valid positive numbers
+    ev.history=(d.rows||[])
+      .map(r=>({ts:r.snapshot_ts,floor:Math.round(Number(r.floor)||0),avg:Math.round(Number(r.avg)||0),median:Math.round(Number(r.median)||0),max:Math.round(Number(r.max)||0),count:Math.round(Number(r.count)||0)}))
+      .filter(s=>s.floor>0&&s.avg>0&&!isNaN(s.floor)&&!isNaN(s.avg));
+  }catch(e){ ev.history=[]; }
 }
-async function saveSnap(src,venue,perf,eid,name,date,stats){
-  const key=skey(src,venue,perf,eid);
+async function saveSnap(src,venue,perf,eid,name,date,stats,dataSource){
+  const key = src==='TE' ? `TE::${eid}` : skey(src,venue,perf,eid);
   const ev=tracked[key]||{key,src,event_id:eid,name,venue,performer:perf,date,added_at:new Date().toISOString(),history:[]};
   const prev=ev.history.length?ev.history[ev.history.length-1]:null;
   const du=daysUntil(date);
-  const snap={source:src,event_id:eid,event_name:name,venue,performer:perf,sport_type:'',event_date:date,days_until_event:du,day_of_week_event:dayOfWeek(date),floor:stats.floor,avg:stats.avg,median:stats.median,max:stats.max,count:stats.count,floor_delta:prev?stats.floor-prev.floor:0,avg_delta:prev?stats.avg-prev.avg:0,median_delta:prev?stats.median-prev.median:0,count_delta:prev?stats.count-prev.count:0,days_until_delta:0,price_buckets:{}};
-  try{ await gasPost({action:'snapshot',src,snapshot:snap}); await gasPost({action:'track',event:{key,src,event_id:eid,name,venue,performer:perf,date,added_at:ev.added_at||new Date().toISOString()}}); }
+  // Round all prices — never write decimals to snapshot
+  const floor=Math.round(stats.floor||0), avg=Math.round(stats.avg||0),
+        median=Math.round(stats.median||0), max=Math.round(stats.max||0),
+        count=Math.round(stats.count||0);
+  const snap={
+    source:src, event_id:eid, event_name:name, venue, performer:perf,
+    sport_type:'', event_date:date,
+    days_until_event:String(Math.max(0,du)), day_of_week_event:dayOfWeek(date),
+    floor, avg, median, max, count,
+    floor_delta:prev?floor-Math.round(prev.floor||0):0,
+    avg_delta:prev?avg-Math.round(prev.avg||0):0,
+    median_delta:prev?median-Math.round(prev.median||0):0,
+    count_delta:prev?count-Math.round(prev.count||0):0,
+    days_until_delta:0, price_buckets:{},
+    data_source:dataSource||'listings'
+  };
+  try{ await gasPost({action:'snapshot',src,snapshot:snap}); }
   catch(e){ toast('SHEETS WRITE FAILED','err'); }
-  ev.history.push({ts:new Date().toISOString(),...stats}); ev.lastUpdate=new Date().toISOString();
+  ev.history.push({ts:new Date().toISOString(),floor,avg,median,max,count});
+  ev.lastUpdate=new Date().toISOString();
   tracked[key]=ev; renderSidebar(); updateTotal(); return key;
 }
 function renderSidebar(){
@@ -713,7 +755,9 @@ function renderSidebar(){
   document.getElementById('tcount').textContent=keys.length;
   if(!keys.length){ el.innerHTML='<div style="padding:12px;color:var(--muted);font-size:10px;">NO EVENTS TRACKED<br><br>USE F3 OR CHAT TO ADD</div>'; return; }
   el.innerHTML=keys.map(k=>{
-    const r=tracked[k]; const h=r.history||[];
+    const r=tracked[k]; 
+    // Filter bad snapshots — floor must be > 0 and not NaN
+    const h=(r.history||[]).filter(s=>s.floor>0&&!isNaN(s.floor)&&s.avg>0&&!isNaN(s.avg));
     if(!h.length) return`<div class="er src-${r.src.toLowerCase()}${k===selKey?' active':''}" onclick="selectEvent('${k}')"><div style="display:flex;justify-content:space-between;"><div class="er-name">${r.name}</div><span class="spill ${r.src.toLowerCase()}">${r.src}</span></div><div class="er-meta">${(r.venue||'').replace(/_/g,' ').substring(0,26)}</div><div class="er-r2"><span style="color:var(--muted);font-size:10px;">LOADING...</span></div></div>`;
     const lat=h[h.length-1],prev=h.length>1?h[h.length-2]:null,fd=prev?lat.floor-prev.floor:0;
     return`<div class="er src-${r.src.toLowerCase()}${k===selKey?' active':''}" onclick="selectEvent('${k}')"><div style="display:flex;justify-content:space-between;align-items:flex-start;"><div class="er-name" title="${r.name}">${r.name}</div><span class="spill ${r.src.toLowerCase()}">${r.src}</span></div><div class="er-meta">${(r.venue||'').replace(/_/g,' ').substring(0,26)}</div><div class="er-r2"><span class="er-floor">${fmt(lat.floor)}</span><span style="font-size:10px;">${dHtml(fd,false)}</span><span class="sct">${h.length}×</span><span class="elst"><span>${fmtC(lat.count)}</span> LST</span></div></div>`;
@@ -796,11 +840,29 @@ async function removeSelected(){
 }
 async function refreshAll(el){
   const keys=Object.keys(tracked); if(!keys.length){toast('NOTHING TO REFRESH','err');return;}
-  el.innerHTML='<span>F9</span>REFRESHING...'; el.style.pointerEvents='none';
-  for(const k of keys){selKey=k;await refreshSelected();}
-  if(keys.length)selectEvent(keys[keys.length-1]);
-  el.innerHTML='<span>F9</span>REFRESH ALL'; el.style.pointerEvents='auto';
-  toast(`${keys.length} REFRESHED`); setSt('REFRESH COMPLETE');
+  if(el){ el.textContent='REFRESHING...'; el.style.pointerEvents='none'; }
+  setSt('REFRESHING ALL TRACKED EVENTS...');
+  try{
+    // Call GAS to run full refresh server-side (same as hourly trigger)
+    const d=await gasPost({action:'refresh_all'});
+    if(d.ok){
+      await loadTracked();
+      renderSidebar(); renderF4Portfolio();
+      await loadIntelFeed(); // pick up new KPI brief
+      toast(`REFRESHED: ${d.count||keys.length} events`);
+      setSt(`REFRESHED ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`);
+    } else {
+      // Fallback: refresh individually client-side
+      for(const k of keys){selKey=k;await refreshSelected();}
+      if(keys.length) selectEvent(keys[keys.length-1]);
+      toast(`${keys.length} REFRESHED`); setSt('REFRESH COMPLETE');
+    }
+  }catch(e){
+    // Fallback on error
+    for(const k of keys){selKey=k;await refreshSelected();}
+    toast(`${keys.length} REFRESHED`); setSt('REFRESH COMPLETE');
+  }
+  if(el){ el.textContent='↺ REFRESH'; el.style.pointerEvents='auto'; }
 }
 
 // ================================================================
@@ -961,7 +1023,7 @@ function applyCustomColor(v,val){ currentTheme.custom[v]=val; document.documentE
 function syncColorPickers(){ const s=getComputedStyle(document.documentElement); const m={'--bg':'c-bg','--bg2':'c-bg2','--amber':'c-amber','--white':'c-white','--sg':'c-sg','--te':'c-te','--border':'c-border','--muted':'c-muted'}; Object.entries(m).forEach(([v,id])=>{const el=document.getElementById(id);if(!el)return;const val=s.getPropertyValue(v).trim();if(val.startsWith('#')&&val.length>=7)el.value=val.substring(0,7);}); }
 function applyBG(name,el){ currentTheme.bg=name; document.querySelectorAll('.bg-card').forEach(c=>c.classList.remove('active')); if(el)el.classList.add('active'); const p=BG_MAPS[name]||BG_MAPS.none,t=document.querySelector('.terminal'); t.style.backgroundImage=p.bg; t.style.backgroundSize=p.size; }
 function applyCursor(name,el){ currentTheme.cursor=name; document.querySelectorAll('.cur-card').forEach(c=>c.classList.remove('active')); if(el)el.classList.add('active'); document.body.style.cursor=name==='none'?'none':name; }
-function applyTermName(val){ currentTheme.name=val; const d=val.trim()||'S4K TERMINAL'; document.getElementById('term-title').innerHTML=`${d.toUpperCase()} <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.5</span>`; document.title=val.trim()||'S4K Terminal'; }
+function applyTermName(val){ currentTheme.name=val; const d=val.trim()||'S4K TERMINAL'; document.getElementById('term-title').innerHTML=`${d.toUpperCase()} <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.2.6</span>`; document.title=val.trim()||'S4K Terminal'; }
 function applyMarquee(val){ currentTheme.marquee=val; const p=document.getElementById('marquee-preview'),inn=document.getElementById('marquee-inner'); if(!val.trim()){p.style.display='none';removeMarqueeBar();return;} p.style.display='block';inn.textContent=val;applyMarqueeBar(val); }
 function applyMarqueeBar(text){ removeMarqueeBar();if(!text)return; const bar=document.createElement('div');bar.id='marquee-bar';bar.style.cssText='overflow:hidden;border-bottom:1px solid var(--border);padding:3px 0;background:var(--bg2);flex-shrink:0;';bar.innerHTML=`<div style="white-space:nowrap;font-size:10px;color:var(--amber);animation:marquee 14s linear infinite;display:inline-block;padding-left:100%;letter-spacing:0.1em;">${text}</div>`;document.querySelector('.statusbar').insertAdjacentElement('afterend',bar); }
 function removeMarqueeBar(){ const el=document.getElementById('marquee-bar');if(el)el.remove(); }
@@ -1182,87 +1244,95 @@ function appendEventCards(events, listingsFound){
   el.appendChild(wrap); el.scrollTop=el.scrollHeight;
 }
 
-// Track without requiring listings — registers event, fetches wiki + weather enrichment
+// Track without requiring listings — registers event, fetches stats + weather + feed in ONE reply
 async function trackFromChat(eid){
   const ev = chatEventStore[eid];
   if(!ev) return;
   const btn=document.getElementById(`tc-${eid}`); if(!btn||btn.disabled)return;
   btn.textContent='TRACKING...'; btn.style.opacity='0.5';
   try{
-    // Build stable IDs for venue and performer
-    const venueId     = ev.venue     ? 'v_'+ev.venue.replace(/[^\w]/g,'_').substring(0,30).toLowerCase()     : '';
+    const venueId     = ev.venue     ? 'v_'+ev.venue.replace(/[^\w]/g,'_').substring(0,30).toLowerCase() : '';
     const performerId = ev.performer ? 'p_'+ev.performer.replace(/[^\w]/g,'_').substring(0,30).toLowerCase() : '';
-
     const evRecord = {
-      key:          skey('TE', ev.venue||'', ev.performer||'', String(ev.id)),
-      src:          'TE',
-      event_id:     String(ev.id),
-      name:         ev.name||'',
-      venue_id:     venueId,
-      venue:        ev.venue||'',
-      venue_city:   ev.venue_city||'',
-      performer_id: performerId,
-      performer:    ev.performer||'',
-      date:         ev.date||ev.date_local||'',
-      added_at:     new Date().toISOString(),
-      history:      []
+      key: `TE::${String(ev.id)}`,  // canonical TEvo key — event_id only
+      src:'TE', event_id:String(ev.id), name:ev.name||'',
+      venue_id:venueId, venue:ev.venue||'', venue_city:ev.venue_city||'',
+      performer_id:performerId, performer:ev.performer||'',
+      date:ev.date||ev.date_local||'', added_at:new Date().toISOString(), history:[]
     };
 
-    // Write to Sheets
     await gasPost({action:'track', event:evRecord});
     tracked[evRecord.key] = evRecord;
     renderSidebar(); updateTotal();
-
     btn.textContent='TRACKED ✓'; btn.classList.add('done'); btn.disabled=true; btn.style.opacity='1';
     toast(`TRACKING: ${ev.name}`);
-    appendToolHint(`${ev.name} added · enriching with stats, Wikipedia + weather...`);
+    appendToolHint(`${ev.name} added · loading market data...`);
 
-    // Background: fetch stats snapshot
-    gasGet({action:'fetch_te_stats', event_id:String(ev.id), name:encodeURIComponent(ev.name||''), venue:encodeURIComponent(ev.venue||''), performer:encodeURIComponent(ev.performer||''), date:ev.date||ev.date_local||''})
-      .then(d=>{
-        if(d.ok && d.stats){
-          const s=d.stats, ext=d.extras||{};
-          saveSnap('TE',ev.venue||'',ev.performer||'',String(ev.id),ev.name||'',ev.date||ev.date_local||'',s);
-          // saveSnap updates tracked[key].history so sidebar can render properly now
-          renderSidebar();
-          const lines=[
-            `**${ev.name} — market stats**`,
-            `Floor: $${s.floor} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listing groups`,
-            `Wholesale floor: $${ext.wholesale_floor||0} · avg: $${ext.wholesale_avg||0}`,
-            `Tickets in market: ${(ext.tickets_count||0).toLocaleString()} · Popularity: ${((ext.popularity_score||0)*100).toFixed(0)}% · State: ${ext.state||'?'}`
-          ];
-          appendChatMsg('ai', lines.join('\n'));
-        } else {
-          appendToolHint(`stats: ${d.error||'no data returned'}`);
-        }
-      }).catch(e=>{ appendToolHint(`stats fetch failed: ${e.message}`); });
+    // Fetch stats + weather in parallel
+    const statsPromise = gasGet({
+      action:'fetch_te_stats', event_id:String(ev.id),
+      name:encodeURIComponent(ev.name||''), venue:encodeURIComponent(ev.venue||''),
+      performer:encodeURIComponent(ev.performer||''), date:ev.date||ev.date_local||''
+    });
 
-    // Background: fetch Wikipedia for performer
-    if(ev.performer){
-      gasGet({action:'get_wiki', q:ev.performer+' NBA team'})
-        .then(w=>{
-          if(w.ok && w.extract){
-            appendChatMsg('ai',`**${w.title}**\n${w.extract.substring(0,300)}${w.extract.length>300?'...':''}\n${w.url}`);
-          }
-        }).catch(()=>{});
+    const weatherPromise = (ev.venue_city && (ev.date||ev.date_local)) ? (() => {
+      const daysOut = Math.round((new Date(ev.date||ev.date_local)-new Date())/864e5);
+      return daysOut>=0&&daysOut<=15
+        ? gasGet({action:'get_weather', city:ev.venue_city, date:new Date(ev.date||ev.date_local).toISOString().split('T')[0]})
+        : Promise.resolve(null);
+    })() : Promise.resolve(null);
+
+    const [statsData, weatherData] = await Promise.all([statsPromise, weatherPromise]);
+
+    // Build single unified reply
+    const lines = [];
+    const dateStr = ev.date ? new Date(ev.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+    lines.push(`**${ev.name}** — Now tracking`);
+    lines.push(`${ev.venue}${ev.venue_city?', '+ev.venue_city:''} · ${dateStr}`);
+
+    // Stats block
+    if(statsData?.ok && statsData.stats){
+      const s=statsData.stats, ext=statsData.extras||{};
+      saveSnap('TE',ev.venue||'',ev.performer||'',String(ev.id),ev.name||'',ev.date||ev.date_local||'',s);
+      renderSidebar();
+      lines.push('');
+      lines.push(`**Market** — Floor: $${s.floor} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listing groups`);
+      if(ext.tickets_count>0) lines.push(`${ext.tickets_count.toLocaleString()} tickets · Popularity: ${((ext.popularity_score||0)*100).toFixed(0)}%`);
     }
 
-    // Background: fetch weather if event date is within 15 days
-    if(ev.venue_city && (ev.date||ev.date_local)){
-      const eventDate = new Date(ev.date||ev.date_local);
-      const daysOut = Math.round((eventDate-new Date())/864e5);
-      if(daysOut>=0 && daysOut<=15){
-        gasGet({action:'get_weather', city:ev.venue_city, date:eventDate.toISOString().split('T')[0]})
-          .then(w=>{
-            if(w.ok){
-              appendChatMsg('ai',`**Weather for ${ev.venue_city} on ${w.date}**\n${w.weather_label} · High ${w.high_f}°F / Low ${w.low_f}°F · ${w.precip_pct}% precip · Wind ${w.wind_mph} mph`);
-            } else if(w.reason==='too_far_out'){
-              appendToolHint(`Weather available ${15-daysOut} days closer to event (${daysOut}d out)`);
-            }
-          }).catch(()=>{});
-      }
+    // Weather block
+    if(weatherData?.ok){
+      const w=weatherData;
+      const precipFlag = w.precip_pct>30 ? ` ⚠ ${w.precip_pct}% precip` : ` · ${w.precip_pct}% precip`;
+      lines.push('');
+      lines.push(`**Weather** — ${w.weather_label} · ${w.high_f}°/${w.low_f}°F${precipFlag} · ${w.wind_mph}mph`);
     }
 
+    // Feed context block — from already-loaded feedItems
+    const feedTerms = [ev.name, ev.performer, ev.venue]
+      .flatMap(s=>(s||'').toLowerCase().split(/\s+at\s+|\s+vs\.?\s+|\s+@\s+/))
+      .map(s=>s.replace(/[^\w\s]/g,'').trim()).filter(s=>s.length>=3);
+    const feedMatches = feedItems.filter(item=>{
+      const t=(item.title||'').trim();
+      if(t.length<=5||/^pic\.?$|^image$/i.test(t)) return false;
+      const text=[item.title||'',item.desc||'',item.source||''].join(' ').toLowerCase();
+      return feedTerms.some(term=>text.includes(term));
+    }).slice(0,3);
+
+    if(feedMatches.length){
+      lines.push('');
+      lines.push(`**Feed (${feedMatches.length} related)**`);
+      feedMatches.forEach(item=>{
+        const impact=item.impact?` [${item.impact}]`:'';
+        lines.push(`· ${item.title.substring(0,90)}${impact}`);
+        if(item.reason&&item.reason!=='matched') lines.push(`  _${item.reason}_`);
+      });
+    } else {
+      lines.push('');
+      lines.push(`_No feed signals for this event — add keyword feeds in F9 to monitor_`);
+    }
+
+    appendChatMsg('ai', lines.join('\n'));
   }catch(e){
     btn.textContent='ERROR'; btn.style.color='var(--red)'; btn.style.borderColor='var(--red)'; btn.style.opacity='1';
     appendToolHint(`Track failed: ${e.message}`);
@@ -1276,42 +1346,80 @@ async function fetchChatListings(eid){
   if(btn){ btn.textContent='LOADING...'; btn.disabled=true; }
   appendToolHint(`fetching listings for ${ev.name}...`);
 
-  const params = {
-    action:   'fetch_te',
-    event_id: eid,
-    name:     encodeURIComponent(ev.name||''),
-    venue:    encodeURIComponent(ev.venue||''),
-    performer:encodeURIComponent(ev.performer||''),
-    date:     ev.date||ev.date_local||''
-  };
-
   try{
-    const d = await gasGet(params);
+    // Fetch listings + weather in parallel
+    const listingsPromise = gasGet({
+      action:'fetch_te', event_id:eid,
+      name:encodeURIComponent(ev.name||''), venue:encodeURIComponent(ev.venue||''),
+      performer:encodeURIComponent(ev.performer||''), date:ev.date||ev.date_local||''
+    });
 
-    if(d.ok && d.stats && d.stats.count > 0){
+    const weatherPromise = (ev.venue_city&&(ev.date||ev.date_local)) ? (() => {
+      const daysOut=Math.round((new Date(ev.date||ev.date_local)-new Date())/864e5);
+      return daysOut>=0&&daysOut<=15
+        ? gasGet({action:'get_weather',city:ev.venue_city,date:new Date(ev.date||ev.date_local).toISOString().split('T')[0]})
+        : Promise.resolve(null);
+    })() : Promise.resolve(null);
+
+    const [d, weatherData] = await Promise.all([listingsPromise, weatherPromise]);
+
+    if(d.ok && d.stats && d.stats.count>0){
       const s=d.stats, w=d.wholesale_stats||{};
-      const parking=d.parking_listings||0;
-      let msg=`${ev.name}\n`;
-      msg+=`**Retail** — Floor: $${s.floor} · Median: $${s.median} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listings`;
-      // Only show wholesale if it differs from retail (stats fallback often returns identical values)
+      const lines=[];
+      const dateStr=ev.date?new Date(ev.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+      lines.push(`**${ev.name}**`);
+      lines.push(`${ev.venue}${ev.venue_city?', '+ev.venue_city:''} · ${dateStr}`);
+      lines.push('');
+
+      // Pricing
+      lines.push(`**Retail** — Floor: $${s.floor} · Median: $${s.median} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listings`);
       if(w.floor&&w.count>0&&(w.floor!==s.floor||w.avg!==s.avg))
-        msg+=`\n**Wholesale** — Floor: $${w.floor} · Avg: $${w.avg} · Max: $${w.max}`;
+        lines.push(`**Wholesale** — Floor: $${w.floor} · Avg: $${w.avg} · Max: $${w.max}`);
       if(d.delivery?.in_hand_count>0||d.delivery?.instant_delivery_count>0)
-        msg+=`\n${d.delivery.in_hand_count} in-hand · ${d.delivery.instant_delivery_count||0} instant delivery`;
-      if(parking>0) msg+=`\n${parking} parking listings excluded`;
-      if(d.source==='stats') msg+=`\n_(aggregate stats — live listings not available)_`;
-      appendChatMsg('ai', msg);
+        lines.push(`${d.delivery.in_hand_count||0} in-hand · ${d.delivery.instant_delivery_count||0} instant delivery`);
+      if(d.source==='stats') lines.push(`_(aggregate stats)_`);
+
+      // Weather
+      if(weatherData?.ok){
+        const wr=weatherData;
+        const precipFlag=wr.precip_pct>30?` ⚠ ${wr.precip_pct}% precip`:` · ${wr.precip_pct}% precip`;
+        lines.push('');
+        lines.push(`**Weather** — ${wr.weather_label} · ${wr.high_f}°/${wr.low_f}°F${precipFlag} · ${wr.wind_mph}mph`);
+      }
+
+      // Feed context
+      const feedTerms=[ev.name,ev.performer,ev.venue]
+        .flatMap(s=>(s||'').toLowerCase().split(/\s+at\s+|\s+vs\.?\s+|\s+@\s+/))
+        .map(s=>s.replace(/[^\w\s]/g,'').trim()).filter(s=>s.length>=3);
+      const feedMatches=feedItems.filter(item=>{
+        const t=(item.title||'').trim();
+        if(t.length<=5||/^pic\.?$|^image$/i.test(t)) return false;
+        const text=[item.title||'',item.desc||'',item.source||''].join(' ').toLowerCase();
+        return feedTerms.some(term=>text.includes(term));
+      }).slice(0,3);
+
+      lines.push('');
+      if(feedMatches.length){
+        lines.push(`**Feed (${feedMatches.length} related)**`);
+        feedMatches.forEach(item=>{
+          const impact=item.impact?` [${item.impact}]`:'';
+          lines.push(`· ${item.title.substring(0,90)}${impact}`);
+          if(item.reason&&item.reason!=='matched') lines.push(`  _${item.reason}_`);
+        });
+      } else {
+        lines.push(`_No feed signals — check F9 to add keyword feeds_`);
+      }
+
+      appendChatMsg('ai', lines.join('\n'));
       if(btn){ btn.textContent='PRICES SHOWN'; btn.style.opacity='0.4'; }
 
       // Auto-save snapshot if tracked
-      const key=skey('TE',ev.venue||'',ev.performer||'',eid);
-      if(tracked[key]) saveSnap('TE',ev.venue||'',ev.performer||'',eid,ev.name||'',ev.date||ev.date_local||'',s);
+      const key=`TE::${eid}`;
+      if(tracked[key]){ saveSnap('TE',ev.venue||'',ev.performer||'',eid,ev.name||'',ev.date||ev.date_local||'',s); renderSidebar(); }
       return;
     }
 
-    // GAS returned error or zero count
-    const reason = d.error || 'no listings or stats available';
-    appendChatMsg('ai', `${ev.name}\nTEvo: ${reason}`);
+    appendChatMsg('ai', `${ev.name}\n${d.error||'No listings or stats available'}`);
     if(btn){ btn.textContent='NO DATA'; btn.style.opacity='0.5'; }
 
   }catch(e){
@@ -1538,17 +1646,92 @@ async function checkForNewSnapshots(){
 async function init(){
   loadCreds();
   loadTheme();
+
+  // Register service worker for PWA
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  }
+
   const c=getCreds();
   if(c.gas){
     await loadTracked();
-    loadIntelFeed();
+    // Default to F6 chat with tutorial
+    showPanel('intel', document.getElementById('fkey-intel'));
+    switchIntelTab('chat', document.getElementById('itab-chat'));
+    showTutorial();
     startSnapshotPoll();
     gasGet({action:'get_settings'}).then(d=>{
       if(d.ok&&d.last_auto_refresh) lastSnapshotTs=d.last_auto_refresh;
     }).catch(()=>{});
   } else {
+    // No GAS URL yet — open to F8 settings
+    showPanel('creds', document.querySelector('.fkey[onclick*="creds"]'));
     setSt('ADD GAS URL IN F8 TO CONNECT');
   }
+}
+
+function showTutorial(){
+  // Only show once per session
+  if(sessionStorage.getItem('s4k_tutorial_shown')) return;
+  sessionStorage.setItem('s4k_tutorial_shown','1');
+
+  const el=document.getElementById('chat-messages');
+  // Clear default placeholder
+  const placeholder=el.querySelector('.chat-placeholder');
+  if(placeholder) placeholder.remove();
+
+  const lines=[
+    `**Welcome to S4K Intelligence** — your ticket market analyst.`,
+    ``,
+    `Here's what you can do right now:`,
+    ``,
+    `**Find events + pricing**`,
+    `· _"Knicks games this week"_ — search TEvo, see listing counts + weather`,
+    `· _"Lakers tonight"_ — pulls market data, feed signals, and weather in one shot`,
+    `· _"Get prices for Indiana Pacers at MSG"_ — floor, median, avg, wholesale`,
+    ``,
+    `**Portfolio**`,
+    `· Click **TRACK** on any event card to add it to your portfolio`,
+    `· Tracked events auto-refresh every hour and push price alerts to F4 + F6`,
+    `· Ask _"what's moving in my portfolio?"_ for a delta summary`,
+    ``,
+    `**Feed intelligence**`,
+    `· F4 shows your live demand feed — rss.app keyword feeds push here`,
+    `· Click **ASK AI ↗** on any feed item to analyze it here`,
+    `· Add keywords in **F9 Settings** to auto-flag relevant news`,
+    ``,
+    `**Auto-refresh**`,
+    `· Run \`setupTriggers()\` in GAS editor once to enable hourly auto-refresh`,
+    `· The **↺ REFRESH** button in the topbar triggers a full portfolio refresh now`,
+    ``,
+    `_Type anything below to get started, or click an example above._`
+  ];
+
+  const div=document.createElement('div');
+  div.className='cmsg ai';
+  div.innerHTML=`<div class="cmsg-label">S4K INTELLIGENCE</div><div class="cbubble">${lines.join('\n').replace(/\n/g,'<br>').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/_(.+?)_/g,'<em>$1</em>').replace(/`(.+?)`/g,'<code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;font-size:10px;">$1</code>')}</div>`;
+  el.appendChild(div);
+
+  // Quick-action chips
+  const chips=[
+    'lakers tonight','knicks this week','show me my portfolio','search rangers playoffs'
+  ];
+  const chipWrap=document.createElement('div');
+  chipWrap.style.cssText='display:flex;gap:6px;flex-wrap:wrap;padding:4px 0 8px 0;';
+  chips.forEach(chip=>{
+    const btn=document.createElement('button');
+    btn.textContent=chip;
+    btn.style.cssText='font-size:10px;padding:3px 10px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:var(--font);border-radius:2px;';
+    btn.onmouseenter=()=>btn.style.color='var(--white)';
+    btn.onmouseleave=()=>btn.style.color='var(--muted)';
+    btn.onclick=()=>{
+      document.getElementById('chat-input').value=chip;
+      sendChat();
+    };
+    chipWrap.appendChild(btn);
+  });
+  el.appendChild(chipWrap);
+  el.scrollTop=el.scrollHeight;
 }
 init();
 </script>

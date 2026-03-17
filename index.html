@@ -355,9 +355,9 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 
     <!-- F4 FEED -->
     <div class="panel" id="panel-feed">
-      <div class="banner rss"><div class="bdot" style="background:var(--rss);"></div><span class="blbl rss">DEMAND FEED</span><span class="bmeta">rss.app webhook push · keyword feeds · AI scored · polls every 60s</span></div>
+      <div class="banner rss"><div class="bdot" style="background:var(--rss);"></div><span class="blbl rss">LIVE FEED</span><span class="bmeta">X/Twitter · ESPN — merged by league · last 14 days on EVENT filter</span></div>
       <div class="chmain">
-        <div style="flex:1;"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="cht" style="color:var(--rss);">LIVE FEED</span><span id="feed-badge" style="font-size:10px;padding:2px 8px;border:1px solid var(--rss);color:var(--rss);">0 ITEMS</span><span id="feed-updated" style="font-size:10px;color:var(--muted);"></span></div><div class="chm">Filters at source via rss.app league tags</div></div>
+        <div style="flex:1;"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span class="cht" style="color:var(--rss);">LIVE FEED</span><span id="feed-badge" style="font-size:10px;padding:2px 8px;border:1px solid var(--rss);color:var(--rss);">0 ITEMS</span><span id="feed-src-counts" style="font-size:10px;color:var(--muted);"></span><span id="feed-updated" style="font-size:10px;color:var(--muted);"></span></div><div class="chm" id="feed-subtitle">X/Twitter + ESPN merged · filter by league or event</div></div>
         <div class="chact"><button class="tmbtn rpri" onclick="loadFeed()" id="btn-feed-ref">REFRESH</button><button class="tmbtn apri" onclick="scoreLiveFeed()" id="btn-score">SCORE WITH AI</button><button class="tmbtn" onclick="showPanel('feedsrc',null)" style="font-size:9px;">MANAGE SOURCES</button></div>
       </div>
       <!-- Portfolio snapshot strip -->
@@ -368,10 +368,28 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
         <div class="fpill" onclick="setLF('NFL',this)">NFL</div>
         <div class="fpill" onclick="setLF('NHL',this)">NHL</div>
         <div class="fpill" onclick="setLF('MLB',this)">MLB</div>
-        <div class="fpill" onclick="setLF('General',this)">GENERAL</div>
+        <div class="fpill" onclick="setLF('NCAA',this)">NCAA</div>
+        <div class="fpill" onclick="setLF('Soccer',this)">SOCCER</div>
+        <div class="fpill" onclick="setLF('MMA',this)">MMA</div>
+        <div class="fpill" onclick="setLF('Concert',this)">CONCERT</div>
+        <div class="fpill" onclick="setLF('Broadway',this)">BWAY</div>
         <div class="fpill" onclick="setLF('matched',this)" style="color:var(--rss);border-color:var(--rss);">MATCHED ●</div>
-        <input class="fsearch" id="feed-kw" placeholder="keyword or team..." oninput="renderFeed()" />
-        <div style="display:flex;gap:4px;margin-left:auto;"><div class="fpill" id="f-high" onclick="setIF('High',this)">HIGH</div><div class="fpill" id="f-med" onclick="setIF('Medium',this)">MED</div></div>
+        <div class="fpill" id="fpill-event" onclick="setLF('event',this)" style="display:none;color:var(--amber);border-color:var(--amber);">EVENT ★</div>
+        <input class="fsearch" id="feed-kw" placeholder="keyword, team, @handle..." oninput="renderFeed()" />
+        <div style="display:flex;gap:4px;margin-left:auto;">
+          <div class="fpill" id="f-high" onclick="setIF('High',this)" style="color:var(--red);border-color:var(--red);">HIGH</div>
+          <div class="fpill" id="f-med" onclick="setIF('Medium',this)">MED</div>
+          <div class="fpill" id="fsrc-x" onclick="setSrc('x',this)" title="X/Twitter only">𝕏</div>
+          <div class="fpill" id="fsrc-espn" onclick="setSrc('espn',this)" title="ESPN only">ESPN</div>
+        </div>
+      </div>
+      <!-- Event context strip — appears when event is selected -->
+      <div id="event-feed-strip" style="display:none;border-bottom:1px solid var(--border);background:rgba(251,188,4,0.04);padding:8px 12px;">
+        <div style="font-size:10px;color:var(--amber);letter-spacing:0.06em;margin-bottom:6px;display:flex;justify-content:space-between;">
+          <span id="event-feed-label">EVENT NEWS — last 14 days</span>
+          <span id="event-feed-count" style="color:var(--muted);"></span>
+        </div>
+        <div id="event-feed-items" style="display:flex;flex-direction:column;gap:3px;max-height:160px;overflow-y:auto;"></div>
       </div>
       <div class="feed-list" id="feed-list"><div class="empty"><span style="font-size:16px;color:var(--border);">▬▬▬</span><span>AWAITING WEBHOOK PUSH<span class="blink">_</span></span><span style="font-size:10px;">ADD RSS_APP_KEY · CREATE KEYWORD FEEDS · ITEMS PUSH AUTOMATICALLY</span></div></div>
     </div>
@@ -674,7 +692,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // STATE
 // ================================================================
 const CKEY='s4k_v526', TKEY='s4k_theme_v1';
-const APP_VERSION='Alpha 1.5'; // single source of truth — update on every release
+const APP_VERSION='Alpha 1.7'; // single source of truth — update on every release
 // Migrate GAS URL from any previous CKEY version so users don't lose settings on version bump
 (function migrateCreds(){
   if(localStorage.getItem(CKEY)) return; // already on current version
@@ -686,7 +704,10 @@ const APP_VERSION='Alpha 1.5'; // single source of truth — update on every rel
 })();
 let tracked={}, selKey=null, chart=null, cmode='price';
 let son={floor:false,med:true,avg:false,max:false};
-let feedItems=[], lfilt='all', ifilt=null;
+let xFeedItems=[], espnFeedItems=[], feedItems=[], lfilt='all', ifilt=null, sfilt=null;
+// eventFeedMap: eventId → [feed items that affect it] (including affected_event_ids)
+// Built after every loadFeed() — used for sidebar badges, chart markers, event strip
+let eventFeedMap = {}; // { "3082845": [{title, pubDate, impact, srcType, ...}] }
 let intelItems=[], intelTypeFilter='all';
 let chatHistory=[], chatWaiting=false;
 let feedPollTimer=null;
@@ -706,7 +727,7 @@ function showPanel(id,el){
   if(el&&el.classList&&el.classList.contains('fkey')) el.classList.add('active');
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('panel-'+id).classList.add('active');
-  if(id==='feed'){ loadFeed(); startFeedPoll(); renderF4Portfolio(); } else { stopFeedPoll(); }
+  if(id==='feed'){ loadFeed(); startFeedPoll(); renderF4Portfolio(); if(selKey) updateEventFeedStrip(selKey); } else { stopFeedPoll(); }
   if(id==='feedsrc'){ loadRSSFeeds(); const u=document.getElementById('gas-url-display'); if(u) u.textContent=getCreds().gas||'(save GAS URL in F8 first)'; }
   if(id==='intel') loadIntelFeed();
   if(id==='usersettings') loadUserSettings();
@@ -1178,7 +1199,14 @@ function renderSidebar(){
     if(!h.length) return`<div class="er src-${r.src.toLowerCase()}${k===selKey?' active':''}" onclick="selectEvent('${k}')"><div style="display:flex;justify-content:space-between;"><div class="er-name">${r.name}</div><span class="spill ${r.src.toLowerCase()}">${r.src}</span></div><div class="er-meta">${(r.venue||'').replace(/_/g,' ').substring(0,26)}</div><div class="er-r2"><span style="color:var(--muted);font-size:10px;">LOADING...</span></div></div>`;
     const lat=h[h.length-1],prev=h.length>1?h[h.length-2]:null,fd=prev?lat.floor-prev.floor:0;
     const nextUpd = getNextUpdateLabel(r.event_id||'');
-    return`<div class="er src-${r.src.toLowerCase()}${k===selKey?' active':''}" onclick="selectEvent('${k}')"><div style="display:flex;justify-content:space-between;align-items:flex-start;"><div class="er-name" title="${r.name}">${r.name}</div><span class="spill ${r.src.toLowerCase()}">${r.src}</span></div><div class="er-meta">${(r.venue||'').replace(/_/g,' ').substring(0,26)}</div><div class="er-r2"><span class="er-floor">${fmt(lat.floor)}</span><span style="font-size:10px;">${dHtml(fd,false)}</span><span class="sct">${h.length}×</span><span class="elst"><span>${fmtC(lat.count)}</span> LST</span>${nextUpd}</div></div>`;
+    // News badge — how many feed items affect this event in last 24h
+    const evNews  = (eventFeedMap[String(r.event_id||'')] || []);
+    const recentNews = evNews.filter(i => (Date.now()-new Date(i.pubDate||0).getTime()) < 24*3600*1000);
+    const highNews   = recentNews.filter(i => i.impact==='High');
+    const newsBadge  = recentNews.length > 0
+      ? `<span style="font-size:9px;padding:0 4px;border-radius:2px;margin-left:4px;background:${highNews.length?'rgba(255,23,68,0.2)':'rgba(251,188,4,0.15)'};color:${highNews.length?'var(--red)':'var(--amber)'};" title="${recentNews.length} news items">${highNews.length?'●':'○'} ${recentNews.length}</span>`
+      : '';
+    return`<div class="er src-${r.src.toLowerCase()}${k===selKey?' active':''}" onclick="selectEvent('${k}')"><div style="display:flex;justify-content:space-between;align-items:flex-start;"><div class="er-name" title="${r.name}">${r.name}</div><span class="spill ${r.src.toLowerCase()}">${r.src}</span></div><div class="er-meta">${(r.venue||'').replace(/_/g,' ').substring(0,26)}</div><div class="er-r2"><span class="er-floor">${fmt(lat.floor)}</span><span style="font-size:10px;">${dHtml(fd,false)}</span><span class="sct">${h.length}×</span><span class="elst"><span>${fmtC(lat.count)}</span> LST</span>${nextUpd}${newsBadge}</div></div>`;
   }).join('');
 }
 async function selectEvent(key){
@@ -1186,6 +1214,8 @@ async function selectEvent(key){
   renderSidebar();
   renderDetail(key);
   showPanel('detail',document.querySelectorAll('.fkey')[0]);
+  // Update EVENT pill and strip in F4 feed
+  updateEventFeedStrip(key);
   // Load feed markers for this event from both Firestore collections
   await loadEventFeedMarkers(key);
   if(selKey===key) renderChart(tracked[key]); // re-render chart with markers
@@ -1233,16 +1263,20 @@ async function loadEventFeedMarkers(key) {
   }
 
   try {
-    // ── Source 1: X/Twitter feed_items — matched by attribution ──
-    const xItems = await FS.getFeedItems({eventId, limit:200});
-    xItems.forEach(item => {
-      const m = toMarker(item, 'x');
-      if (m) markers.push(m);
-    });
+    // Primary: use eventFeedMap if already built (instant — no Firestore call needed)
+    const mapItems = eventFeedMap[String(eventId)] || [];
+    if(mapItems.length > 0) {
+      mapItems.forEach(item => {
+        const m = toMarker(item, item.srcType||'x');
+        if(m) markers.push(m);
+      });
+    } else {
+      // Fallback: query Firestore directly
+      const xItems = await FS.getFeedItems({eventId, limit:200});
+      xItems.forEach(item => { const m=toMarker(item,'x'); if(m) markers.push(m); });
+    }
 
-    // ── Source 2: ESPN espn_feed ──────────────────────────────────
-    // Try matched_event_id first (populated by EspnPoller performer match)
-    // Fall back to league + performer text filter
+    // ESPN — try direct match first, then league+text
     const evLeague    = ev.league || inferLeague(ev);
     const performerLc = (ev.performer||'').toLowerCase();
     const nameParts   = performerLc.split(/\s+/).filter(w => w.length >= 4);
@@ -1554,51 +1588,151 @@ async function fetchTE(eid,name,venue,perf,date){
 // F4 — DEMAND FEED (rss.app webhook-powered)
 // ================================================================
 async function loadFeed(){
-  const btn=document.getElementById('btn-feed-ref'); btn.disabled=true; btn.textContent='FETCHING...'; setSt('FETCHING LIVE FEED...');
+  const btn=document.getElementById('btn-feed-ref');
+  btn.disabled=true; btn.textContent='FETCHING...'; setSt('FETCHING LIVE FEED...');
   try{
-    // Direct Firestore read — feed_items/ collection
-    const opts = {limit:150};
-    if(lfilt && lfilt!=='all' && lfilt!=='matched') opts.league = lfilt;
-    if(lfilt==='matched') opts.matched = true;
+    // Fetch X/Twitter (feed_items/) and ESPN (espn_feed/) in parallel
+    const [xItems, espnItems] = await Promise.allSettled([
+      loadXFeedItems(),
+      loadEspnFeedItems()
+    ]);
 
-    let items;
-    try {
-      const docs = await FS.getFeedItems(opts);
-      items = docs.map(d=>({
-        title:    d.post_text||d.title||'',
-        link:     d.post_url||d.url||'',
-        desc:     d.post_full||d.description||'',
-        pubDate:  d.posted_at||d.received_ts||'',
-        source:   d.feed_name||d.feed_title||'',
-        author:   d.author_name||'',
-        handle:   d.author_handle||'',
-        league:   d.league||d.feed_league||'General',
-        impact:   d.impact||null,
-        category: d.attr_category||d.category||null,
-        reason:   d.reason||null,
-        matched:  d.matched||false,
-        event_id: d.matched_event_id||'',
-        event_name:d.matched_event_name||'',
-        price_floor:d.price_floor_at_match||0,
-        hashtags: d.attr_keywords||[]
-      }));
-    } catch(fsErr) {
-      // Fallback to GAS if Firestore token not available
-      const params={action:'get_rss_live',limit:150};
-      if(lfilt&&lfilt!=='all'&&lfilt!=='matched') params.league=lfilt;
-      const d=await gasGet(params);
-      items=(d.items||[]).map(i=>({
-        title:i.post_text||i.item_title||'', link:i.post_url||i.item_url||'',
-        desc:i.post_full||i.item_description||'',
-        pubDate:i.posted_at||i.item_published||i.received_ts||'',
-        source:i.feed_name||i.feed_title||'', author:i.author_name||'',
-        handle:i.author_handle||'', league:i.league||i.feed_league||'General',
-        impact:i.impact||null, category:i.attr_category||i.category||null,
-        reason:i.reason||null, matched:!!(i.matched_event_id),
-        event_id:i.matched_event_id||'', event_name:i.matched_event_name||'',
-        price_floor:i.price_floor_at_match||0, hashtags:[]
-      }));
-    }
+    xFeedItems    = xItems.status==='fulfilled'    ? xItems.value    : xFeedItems;
+    espnFeedItems = espnItems.status==='fulfilled' ? espnItems.value : espnFeedItems;
+
+    // Merge + sort by pubDate descending
+    feedItems = mergeFeeds(xFeedItems, espnFeedItems);
+
+    const xCount    = xFeedItems.length;
+    const espnCount = espnFeedItems.length;
+    const matched   = feedItems.filter(i=>i.matched||i.event_id).length;
+
+    document.getElementById('feed-badge').textContent=`${feedItems.length} ITEMS${matched?` · ${matched} MATCHED`:''}`;
+    const srcEl = document.getElementById('feed-src-counts');
+    if(srcEl) srcEl.textContent=`𝕏 ${xCount} · ESPN ${espnCount}`;
+    document.getElementById('feed-updated').textContent=` · ${new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}`;
+
+    feedItems.length ? renderFeed() : document.getElementById('feed-list').innerHTML=`<div class="empty"><span style="font-size:16px;color:var(--border);">▬▬▬</span><span>NO ITEMS YET<span class="blink">_</span></span><span style="font-size:10px;">CREATE FEEDS IN MANAGE SOURCES · ITEMS ARRIVE VIA WEBHOOK</span></div>`;
+
+    // Update event context strip if an event is selected
+    if(selKey) updateEventFeedStrip(selKey);
+    setSt('FEED READY');
+  }catch(e){toast(`FEED FAILED: ${e.message}`,'err');setSt('FEED ERROR');}
+  btn.disabled=false; btn.textContent='REFRESH';
+}
+
+// Fetch X/Twitter items from feed_items/ Firestore
+async function loadXFeedItems(){
+  try {
+    const opts = {limit:300};
+    const docs = await FS.getFeedItems(opts);
+    return docs.map(d=>({
+      title:    d.post_text||d.title||'',
+      link:     d.post_url||d.url||'',
+      desc:     d.post_full||d.description||'',
+      pubDate:  d.posted_at||d.received_ts||'',
+      source:   d.feed_name||d.feed_title||'',
+      author:   d.author_name||'',
+      handle:   d.author_handle||'',
+      league:   d.league||d.feed_league||d.attr_league||'General',
+      impact:   d.impact||null,
+      category: d.attr_category||d.category||null,
+      matched:  d.matched||!!(d.matched_event_id),
+      event_id: d.matched_event_id||'',
+      event_name:d.matched_event_name||'',
+      price_floor:d.price_floor_at_match||0,
+      keywords: d.attr_keywords||[],
+      srcType:  'x',
+      affected_event_ids:  d.affected_event_ids||[],
+      affected_event_names:d.affected_event_names||[]
+    }));
+  } catch(e) {
+    // GAS fallback
+    const d = await gasGet({action:'get_rss_live', limit:300});
+    return (d.items||[]).map(i=>({
+      title:i.post_text||i.item_title||'', link:i.post_url||i.item_url||'',
+      desc:i.post_full||i.item_description||'',
+      pubDate:i.posted_at||i.item_published||i.received_ts||'',
+      source:i.feed_name||i.feed_title||'', author:i.author_name||'',
+      handle:i.author_handle||'', league:i.league||i.feed_league||'General',
+      impact:i.impact||null, category:i.attr_category||i.category||null,
+      matched:!!(i.matched_event_id), event_id:i.matched_event_id||'',
+      event_name:i.matched_event_name||'', price_floor:i.price_floor_at_match||0,
+      keywords:[], srcType:'x'
+    }));
+  }
+}
+
+// Fetch ESPN items from espn_feed/ Firestore
+async function loadEspnFeedItems(){
+  try {
+    const docs = await FS.query(
+      'espn_feed',
+      [{field:'matched', op:'EQUAL', value:true}],
+      [{field:'received_ts', dir:'DESCENDING'}],
+      300
+    );
+    return docs.map(d=>({
+      title:    d.title||'',
+      link:     d.article_url||'',
+      desc:     d.description||'',
+      pubDate:  d.pub_date||d.received_ts||'',
+      source:   d.creator||'ESPN',
+      author:   d.creator||'',
+      handle:   '',
+      league:   d.feed_league||'General',
+      impact:   d.impact||null,
+      category: 'espn',
+      matched:  !!(d.matched_event_id||d.matched),
+      event_id: d.matched_event_id||'',
+      event_name:d.matched_event_name||'',
+      price_floor:0,
+      keywords: (d.keywords_hit||'').split(',').filter(Boolean),
+      srcType:  'espn'
+    }));
+  } catch(e) { return []; }
+}
+
+// Merge X + ESPN, deduplicate by title similarity, sort newest first.
+// Also builds eventFeedMap: eventId → all feed items affecting that event.
+// Uses affected_event_ids (many-to-many) not just matched_event_id.
+function mergeFeeds(x, espn){
+  const all = [...x, ...espn];
+
+  // Deduplicate: same title prefix within 30 min = same story
+  const seen = new Map();
+  const merged = all
+    .filter(item => {
+      if(!item.title||item.title.length<5) return false;
+      const key = item.title.substring(0,40).toLowerCase().replace(/[^\w]/g,'');
+      const ts  = new Date(item.pubDate||0).getTime();
+      const prev = seen.get(key);
+      if(prev && Math.abs(prev.ts - ts) < 30*60*1000) return false;
+      seen.set(key, {ts});
+      return true;
+    })
+    .sort((a,b)=>new Date(b.pubDate||0)-new Date(a.pubDate||0));
+
+  // Build eventFeedMap — which feed items affect which tracked events
+  // Sources: affected_event_ids (GAS multi-match) + matched_event_id (primary)
+  const newMap = {};
+  merged.forEach(item => {
+    const eids = new Set();
+    // Add all affected events (the many-to-many field)
+    (item.affected_event_ids||[]).forEach(eid => { if(eid) eids.add(String(eid)); });
+    // Always include primary match too
+    if(item.event_id) eids.add(String(item.event_id));
+
+    eids.forEach(eid => {
+      if(!newMap[eid]) newMap[eid] = [];
+      newMap[eid].push(item);
+    });
+  });
+  eventFeedMap = newMap;
+
+  return merged;
+}
+
 
     const prevCount=feedItems.length;
     feedItems=items;
@@ -1618,39 +1752,152 @@ async function scoreLiveFeed(){
   catch(e){toast(`SCORE FAILED: ${e.message}`,'err');}
   btn.disabled=false; btn.textContent='SCORE WITH AI'; setSt('READY');
 }
-function setLF(l,el){ lfilt=l; document.querySelectorAll('.feed-bar .fpill').forEach(p=>{if(['ALL','NBA','NFL','NHL','MLB','GENERAL'].includes(p.textContent))p.classList.remove('active');}); el.classList.add('active'); loadFeed(); }
-function setIF(i,el){ ifilt=ifilt===i?null:i; document.querySelectorAll('#f-high,#f-med').forEach(p=>p.classList.remove('active')); if(ifilt)el.classList.add('active'); renderFeed(); }
+
+function setLF(l,el){
+  lfilt=l;
+  // Clear all pill active states
+  document.querySelectorAll('.feed-bar .fpill').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  renderFeed();
+}
+function setIF(i,el){
+  ifilt=ifilt===i?null:i;
+  document.querySelectorAll('#f-high,#f-med').forEach(p=>p.classList.remove('active'));
+  if(ifilt) el.classList.add('active');
+  renderFeed();
+}
+function setSrc(s,el){
+  sfilt=sfilt===s?null:s;
+  document.querySelectorAll('#fsrc-x,#fsrc-espn').forEach(p=>p.classList.remove('active'));
+  if(sfilt) el.classList.add('active');
+  renderFeed();
+}
+
+// ── Event context feed strip ──────────────────────────────────────
+// Shown at top of F4 when an event is selected.
+// Shows items from last 14 days mentioning the event's team/performer.
+// Sources: both xFeedItems and espnFeedItems.
+function updateEventFeedStrip(key){
+  const strip  = document.getElementById('event-feed-strip');
+  const itemEl = document.getElementById('event-feed-items');
+  const label  = document.getElementById('event-feed-label');
+  const count  = document.getElementById('event-feed-count');
+  const pill   = document.getElementById('fpill-event');
+  if(!strip||!itemEl) return;
+
+  const ev = tracked[key];
+  if(!ev){ strip.style.display='none'; if(pill)pill.style.display='none'; return; }
+
+  const cutoff = Date.now() - 14*24*3600*1000;
+
+  // Primary: eventFeedMap (from affected_event_ids — many-to-many, most accurate)
+  let relevant = (eventFeedMap[String(ev.event_id||'')] || [])
+    .filter(i => new Date(i.pubDate||0).getTime() > cutoff)
+    .sort((a,b) => new Date(b.pubDate||0) - new Date(a.pubDate||0));
+
+  // Fallback: text match (for items before affected_event_ids was added)
+  if(relevant.length === 0 && feedItems.length > 0){
+    const terms = [(ev.performer||''),(ev.name||'')]
+      .flatMap(s=>s.toLowerCase().split(/\s+(?:at|vs\.?|@)\s+/).flatMap(t=>t.split(/\s+/)))
+      .map(t=>t.replace(/[^\w]/g,'').trim()).filter(t=>t.length>=4);
+    relevant = feedItems.filter(item=>{
+      if(!item.title||item.title.length<5) return false;
+      const age=new Date(item.pubDate||0).getTime();
+      if(age<cutoff) return false;
+      if(item.event_id&&String(item.event_id)===String(ev.event_id)) return true;
+      const text=(item.title+' '+(item.desc||'')).toLowerCase();
+      return terms.some(t=>text.includes(t));
+    }).sort((a,b)=>new Date(b.pubDate||0)-new Date(a.pubDate||0));
+  }
+
+  if(!relevant.length){ strip.style.display='none'; if(pill)pill.style.display='none'; return; }
+
+  strip.style.display='block';
+  if(pill) pill.style.display='inline-block';
+  const evName=(ev.name||'').length>30?(ev.name||'').substring(0,30)+'...':(ev.name||'');
+  label.textContent=`${evName} — last 14 days`;
+  const highCount=relevant.filter(i=>i.impact==='High').length;
+  count.style.color=highCount?'var(--red)':'var(--muted)';
+  count.textContent=`${relevant.length} items${highCount?' · '+highCount+' HIGH':''}`;
+
+  itemEl.innerHTML=relevant.slice(0,20).map(item=>{
+    const srcIcon=item.srcType==='espn'?'📺':'🐦';
+    const impColor=item.impact==='High'?'var(--red)':item.impact==='Medium'?'var(--amber)':'var(--muted)';
+    const handle=item.handle?item.handle:item.source||item.author||'';
+    const alsoAffects=(item.affected_event_names||[]).filter(n=>n!==ev.name).slice(0,2);
+    const alsoStr=alsoAffects.length?`<span style="color:var(--muted);"> · also: ${alsoAffects.join(', ')}</span>`:'';
+    return `<div style="display:flex;gap:8px;align-items:flex-start;padding:4px 0;border-bottom:1px solid var(--bg3);cursor:pointer;" onclick="${item.link?`window.open('${item.link.replace(/'/g,"")}','_blank')`:''}">
+      <span style="font-size:11px;flex-shrink:0;">${srcIcon}</span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:11px;color:var(--white);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${item.title}</div>
+        <div style="font-size:10px;color:var(--muted);display:flex;gap:8px;margin-top:1px;flex-wrap:wrap;">
+          <span style="color:${impColor};">${item.impact||'—'}</span><span>${handle}</span>
+          <span>${ago(item.pubDate)}</span>
+          ${item.keywords&&item.keywords.length?`<span style="color:var(--cyan);">${item.keywords.slice(0,2).join(', ')}</span>`:''}
+          ${alsoStr}
+        </div>
+      </div>
+      <button onclick="event.stopPropagation();feedToChat('${(item.title||'').replace(/['"]/g,'').substring(0,80)}','${handle}')" style="font-size:9px;padding:1px 6px;border:1px solid var(--purple);color:var(--purple);background:transparent;cursor:pointer;font-family:var(--font);flex-shrink:0;">AI</button>
+    </div>`;
+  }).join('');
+}
+
+
 function renderFeed(){
   const kw=(document.getElementById('feed-kw').value||'').toLowerCase();
   let items=[...feedItems];
+
+  // Source filter
+  if(sfilt==='x')    items=items.filter(i=>i.srcType==='x');
+  if(sfilt==='espn') items=items.filter(i=>i.srcType==='espn');
+
+  // League / special filters
   if(lfilt&&lfilt!=='all'){
-    if(lfilt==='matched') items=items.filter(i=>i.category==='matched'||i.reason==='matched'||i.priority==='matched');
-    else items=items.filter(i=>i.league===lfilt);
+    if(lfilt==='matched') items=items.filter(i=>i.matched||i.event_id);
+    else if(lfilt==='event'){
+      // Show items relevant to selected event
+      const ev=selKey?tracked[selKey]:null;
+      if(ev){
+        const terms=[(ev.performer||''),(ev.name||'')]
+          .flatMap(s=>s.toLowerCase().split(/\s+(?:at|vs\.?|@)\s+/).flatMap(t=>t.split(/\s+/)))
+          .map(t=>t.replace(/[^\w]/g,'').trim()).filter(t=>t.length>=4);
+        const cutoff=Date.now()-14*24*3600*1000;
+        items=items.filter(i=>{
+          if(new Date(i.pubDate||0).getTime()<cutoff) return false;
+          if(i.event_id&&String(i.event_id)===String(ev.event_id)) return true;
+          const text=(i.title+' '+(i.desc||'')).toLowerCase();
+          return terms.some(t=>text.includes(t));
+        });
+      }
+    }
+    else items=items.filter(i=>i.league===lfilt||(i.league||'').toLowerCase()===lfilt.toLowerCase());
   }
+
   if(ifilt) items=items.filter(i=>i.impact===ifilt);
-  if(kw) items=items.filter(i=>(i.title||'').toLowerCase().includes(kw)||(i.source||'').toLowerCase().includes(kw)||(i.desc||'').toLowerCase().includes(kw));
+  if(kw)    items=items.filter(i=>(i.title||'').toLowerCase().includes(kw)||(i.handle||'').toLowerCase().includes(kw)||(i.desc||'').toLowerCase().includes(kw)||(i.keywords||[]).some(k=>k.includes(kw)));
+
   const el=document.getElementById('feed-list');
   if(!items.length){el.innerHTML=`<div class="empty" style="height:200px;"><span style="color:var(--muted);font-size:11px;">NO ITEMS MATCH FILTER</span></div>`;return;}
-  el.innerHTML=items.map(item=>{
-    const isMatched = item.matched || !!(item.event_id);
-    const authorStr = item.handle ? `${item.handle}` : item.source||'';
+  el.innerHTML=items.slice(0,200).map(item=>{
+    const isMatched=item.matched||!!(item.event_id);
+    const srcIcon = item.srcType==='espn'?'<span style="font-size:9px;padding:0 4px;border:1px solid var(--cyan);color:var(--cyan);margin-right:4px;">ESPN</span>':'';
+    const authorStr = item.handle ? item.handle : item.source||item.author||'';
     const priceStr  = item.price_floor>0 ? `<span style="font-size:9px;color:var(--cyan);margin-left:6px;">$${item.price_floor} at arrival</span>` : '';
-    const eventStr  = item.event_name ? `<span style="font-size:9px;color:var(--amber);margin-left:6px;">→ ${item.event_name.substring(0,30)}</span>` : '';
+    const eventStr  = item.event_name ? `<span style="font-size:9px;color:var(--amber);margin-left:6px;">→ ${item.event_name.substring(0,28)}</span>` : '';
+    const kwStr     = item.keywords&&item.keywords.length ? `<span style="font-size:9px;color:var(--purple);margin-left:6px;">${item.keywords.slice(0,2).join(' · ')}</span>` : '';
     return`<div class="fi" style="${isMatched?'border-left:3px solid var(--rss);':''}" onclick="${item.link?`window.open('${item.link.replace(/'/g,'')}','_blank')`:''}">
       <div class="fi-top">
-        <div class="fi-title">${item.title}</div>
+        <div class="fi-title">${srcIcon}${item.title}</div>
         ${item.impact?`<span class="fi-imp ${item.impact}">${item.impact.toUpperCase()}</span>`:''}
         ${isMatched?`<span style="font-size:9px;padding:1px 5px;border:1px solid var(--rss);color:var(--rss);margin-left:4px;">MATCHED</span>`:''}
       </div>
       <div class="fi-meta">
         <span class="fi-src">${authorStr}</span>
-        <span class="fi-tag">${item.league}</span>
-        ${item.category&&item.category!=='matched'?`<span class="fi-tag" style="color:var(--purple);border-color:var(--purple);">${item.category}</span>`:''}
+        <span class="fi-tag">${item.league||'General'}</span>
         <span class="fi-time">${ago(item.pubDate)}</span>
-        ${priceStr}${eventStr}
+        ${priceStr}${eventStr}${kwStr}
       </div>
       ${item.desc&&item.desc!==item.title?`<div class="fi-desc">${item.desc.substring(0,140)}${item.desc.length>140?'...':''}</div>`:''}
-      ${item.reason&&item.reason!=='matched'?`<div class="fi-reason">${item.reason}</div>`:''}
       <div style="margin-top:6px;"><button onclick="event.stopPropagation();feedToChat('${(item.title||'').replace(/'/g,'').replace(/"/g,'').substring(0,80)}','${authorStr}')" style="font-size:9px;padding:2px 8px;border:1px solid var(--purple);color:var(--purple);background:transparent;cursor:pointer;font-family:var(--font);">ASK AI ↗</button></div>
     </div>`;
   }).join('');

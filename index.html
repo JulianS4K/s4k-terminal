@@ -249,6 +249,13 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 .cmsg.user .cbubble{background:var(--bg3);border:1px solid var(--border);margin-left:40px;}
 .cmsg.ai .cbubble{background:var(--bg2);border:1px solid var(--border);margin-right:40px;}
 .cbubble{padding:10px 12px;border-radius:4px;font-size:12px;line-height:1.6;color:var(--white);}
+.cbubble ul,.cbubble ol{margin:4px 0 4px 16px;padding:0;}
+.cbubble li{margin:2px 0;font-size:11px;}
+.cbubble table{width:100%;border-collapse:collapse;font-size:11px;margin:6px 0;}
+.cbubble th{padding:4px 8px;border-bottom:1px solid var(--border);color:var(--amber);text-align:left;}
+.cbubble td{padding:4px 8px;border-bottom:1px solid var(--bg3);}
+.cbubble pre{background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:3px;padding:8px 12px;overflow-x:auto;font-size:11px;line-height:1.5;margin:6px 0;}
+.cbubble code{font-family:var(--font);}
 .cmsg-label{font-size:9px;color:var(--muted);margin-bottom:3px;letter-spacing:0.1em;}
 .cmsg.user .cmsg-label{text-align:right;}
 .chat-input-wrap{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--border);flex-shrink:0;background:var(--bg2);}
@@ -692,7 +699,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // STATE
 // ================================================================
 const CKEY='s4k_v526', TKEY='s4k_theme_v1';
-const APP_VERSION='Alpha 1.9'; // single source of truth — update on every release
+const APP_VERSION='Alpha 2.0'; // single source of truth — update on every release
 // Migrate GAS URL from any previous CKEY version so users don't lose settings on version bump
 (function migrateCreds(){
   if(localStorage.getItem(CKEY)) return; // already on current version
@@ -2083,11 +2090,98 @@ async function sendChat(){
   chatWaiting=false; sendBtn.disabled=false; sendBtn.textContent='SEND';
 }
 
-function appendChatMsg(role,content,id){
-  const el=document.getElementById('chat-messages');
-  const div=document.createElement('div'); div.className=`cmsg ${role}`; if(id)div.id=id;
-  div.innerHTML=`<div class="cmsg-label">${role==='user'?'YOU':'S4K INTELLIGENCE'}</div><div class="cbubble">${content.replace(/\n/g,'<br>')}</div>`;
-  el.appendChild(div); el.scrollTop=el.scrollHeight; return div;
+// ── Markdown renderer for chat messages ──────────────────────────
+// Converts Claude's markdown output to clean HTML.
+// Handles: bold, italic, inline code, code blocks, tables, lists, headers.
+function renderMarkdown(text) {
+  if (!text) return '';
+  let html = text;
+
+  // Code blocks (``` ... ```) — preserve before other processing
+  const codeBlocks = [];
+  html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(`<pre style="background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:3px;padding:8px 12px;overflow-x:auto;font-size:11px;line-height:1.5;margin:6px 0;"><code style="font-family:var(--font);color:#A5D6A7;">${code.replace(/</g,'&lt;').replace(/>/g,'&gt;').trim()}</code></pre>`);
+    return `\x00CODE${idx}\x00`;
+  });
+
+  // Tables — | col | col | rows
+  html = html.replace(/(\|.+\|\n)+/g, tableBlock => {
+    const rows = tableBlock.trim().split('\n').filter(r => r.trim());
+    const isSep = r => /^[\|\s\-:]+$/.test(r);
+    let out = '<table style="width:100%;border-collapse:collapse;font-size:11px;margin:6px 0;">';
+    let inHead = true;
+    rows.forEach(row => {
+      if (isSep(row)) { inHead = false; return; }
+      const cells = row.split('|').map(c=>c.trim()).filter((_,i,a)=>i>0&&i<a.length-1);
+      const tag = inHead ? 'th' : 'td';
+      const style = inHead
+        ? 'padding:4px 8px;border-bottom:1px solid var(--border);color:var(--amber);text-align:left;'
+        : 'padding:4px 8px;border-bottom:1px solid var(--bg3);color:var(--white);';
+      out += `<tr>${cells.map(c=>`<${tag} style="${style}">${c}</${tag}>`).join('')}</tr>`;
+    });
+    out += '</table>';
+    return out;
+  });
+
+  // Headers
+  html = html.replace(/^### (.+)$/gm, '<div style="font-size:12px;color:var(--amber);font-weight:600;margin:8px 0 4px;">$1</div>');
+  html = html.replace(/^## (.+)$/gm,  '<div style="font-size:13px;color:var(--white);font-weight:600;margin:10px 0 4px;">$1</div>');
+  html = html.replace(/^# (.+)$/gm,   '<div style="font-size:14px;color:var(--white);font-weight:700;margin:10px 0 6px;">$1</div>');
+
+  // Bullet lists
+  html = html.replace(/((?:^[ \t]*[-*+] .+\n?)+)/gm, block => {
+    const items = block.trim().split('\n').map(l => l.replace(/^[ \t]*[-*+] /, '').trim());
+    return '<ul style="margin:4px 0 4px 16px;padding:0;list-style:disc;">' +
+           items.map(i=>`<li style="margin:2px 0;color:var(--white);font-size:11px;">${i}</li>`).join('') +
+           '</ul>';
+  });
+
+  // Numbered lists
+  html = html.replace(/((?:^[ \t]*\d+\. .+\n?)+)/gm, block => {
+    const items = block.trim().split('\n').map(l => l.replace(/^[ \t]*\d+\. /, '').trim());
+    return '<ol style="margin:4px 0 4px 16px;padding:0;">' +
+           items.map(i=>`<li style="margin:2px 0;color:var(--white);font-size:11px;">${i}</li>`).join('') +
+           '</ol>';
+  });
+
+  // Inline formatting
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong style="color:var(--white);">$1</strong>');
+  html = html.replace(/__(.+?)__/g,     '<strong style="color:var(--white);">$1</strong>');
+  html = html.replace(/\*(.+?)\*/g,     '<em style="color:var(--muted);">$1</em>');
+  html = html.replace(/_([^_]+)_/g,     '<em style="color:var(--muted);">$1</em>');
+  html = html.replace(/`([^`]+)`/g,     '<code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;font-size:10px;font-family:var(--font);">$1</code>');
+
+  // Dollar amounts — highlight in cyan
+  html = html.replace(/\$(\d[\d,.]+)/g, '<span style="color:var(--cyan);">$$$1</span>');
+
+  // Horizontal rule
+  html = html.replace(/^---+$/gm, '<hr style="border:none;border-top:1px solid var(--border);margin:8px 0;">');
+
+  // Line breaks
+  html = html.replace(/\n\n+/g, '<br><br>');
+  html = html.replace(/\n/g,    '<br>');
+
+  // Restore code blocks
+  codeBlocks.forEach((block, i) => {
+    html = html.replace(`\x00CODE${i}\x00`, block);
+  });
+
+  return html;
+}
+
+function appendChatMsg(role, content, id){
+  const el  = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = `cmsg ${role}`;
+  if(id) div.id = id;
+  const rendered = role === 'assistant'
+    ? renderMarkdown(content)
+    : content.replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+  div.innerHTML = `<div class="cmsg-label">${role==='user'?'YOU':'S4K INTELLIGENCE'}</div><div class="cbubble">${rendered}</div>`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+  return div;
 }
 
 function appendToolHint(text){
@@ -2977,7 +3071,7 @@ function showTutorial(){
 
   const div=document.createElement('div');
   div.className='cmsg ai';
-  div.innerHTML=`<div class="cmsg-label">S4K INTELLIGENCE</div><div class="cbubble">${lines.join('\n').replace(/\n/g,'<br>').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/_(.+?)_/g,'<em>$1</em>').replace(/`(.+?)`/g,'<code style="background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;font-size:10px;">$1</code>')}</div>`;
+  div.innerHTML=`<div class="cmsg-label">S4K INTELLIGENCE</div><div class="cbubble">${renderMarkdown(lines.join('\n'))}</div>`;
   el.appendChild(div);
 
   // Quick-action chips

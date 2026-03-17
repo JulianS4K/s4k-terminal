@@ -674,7 +674,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // STATE
 // ================================================================
 const CKEY='s4k_v526', TKEY='s4k_theme_v1';
-const APP_VERSION='Alpha 1.2'; // single source of truth — update on every release
+const APP_VERSION='Alpha 1.3'; // single source of truth — update on every release
 // Migrate GAS URL from any previous CKEY version so users don't lose settings on version bump
 (function migrateCreds(){
   if(localStorage.getItem(CKEY)) return; // already on current version
@@ -878,11 +878,18 @@ const FS = (() => {
     return getDoc('event_index', String(eventId));
   }
 
-  // ESPN feed items
-  async function getEspnItems({league, limit=100} = {}) {
-    const filters = league && league !== 'all'
-      ? [{field:'feed_league', op:'EQUAL', value:league}]
-      : [{field:'matched', op:'EQUAL', value:true}];
+  // ESPN feed items — filter by league, matched, or directly by event
+  async function getEspnItems({league, eventId, limit=100} = {}) {
+    const filters = [];
+    if (eventId) {
+      // Direct event match (populated by EspnPoller.gs performer matching)
+      filters.push({field:'matched_event_id', op:'EQUAL', value:String(eventId)});
+    } else if (league && league !== 'all') {
+      filters.push({field:'feed_league', op:'EQUAL', value:league});
+      filters.push({field:'matched', op:'EQUAL', value:true});
+    } else {
+      filters.push({field:'matched', op:'EQUAL', value:true});
+    }
     return query('espn_feed', filters, [{field:'received_ts', dir:'DESCENDING'}], limit);
   }
 
@@ -1112,8 +1119,148 @@ function renderSidebar(){
     return`<div class="er src-${r.src.toLowerCase()}${k===selKey?' active':''}" onclick="selectEvent('${k}')"><div style="display:flex;justify-content:space-between;align-items:flex-start;"><div class="er-name" title="${r.name}">${r.name}</div><span class="spill ${r.src.toLowerCase()}">${r.src}</span></div><div class="er-meta">${(r.venue||'').replace(/_/g,' ').substring(0,26)}</div><div class="er-r2"><span class="er-floor">${fmt(lat.floor)}</span><span style="font-size:10px;">${dHtml(fd,false)}</span><span class="sct">${h.length}×</span><span class="elst"><span>${fmtC(lat.count)}</span> LST</span>${nextUpd}</div></div>`;
   }).join('');
 }
-function selectEvent(key){ selKey=key; renderSidebar(); renderDetail(key); showPanel('detail',document.querySelectorAll('.fkey')[0]); }
-function renderDetail(key){
+async function selectEvent(key){
+  selKey=key;
+  renderSidebar();
+  renderDetail(key);
+  showPanel('detail',document.querySelectorAll('.fkey')[0]);
+  // Load feed markers for this event from both Firestore collections
+  await loadEventFeedMarkers(key);
+  if(selKey===key) renderChart(tracked[key]); // re-render chart with markers
+}
+// ── Feed markers per event ────────────────────────────────────────
+// Loads matched feed items for a tracked event from Firestore.
+// Sources: feed_items/ (X/Twitter via attribution) + espn_feed/ (ESPN RSS).
+// Stored in ev.feedMarkers — used by renderChart for triangle overlays.
+//
+// X feed items:  query by matched_event_id (set by TeamLinking attribution)
+// ESPN items:    query by feed_league + performer name in title/description
+//                (attribution stored at write time when possible)
+//
+// Color coding:
+//   Red    = High impact (injury, trade, star out)
+//   Amber  = Medium impact (lineup change, questionable)
+//   Green  = Low impact / informational
+//   Cyan   = ESPN sourced
+async function loadEventFeedMarkers(key) {
+  const ev = tracked[key];
+  if (!ev || !ev.event_id) return;
+
+  const markers = [];
+  const eventId = String(ev.event_id);
+
+  // Helper: convert feed item to marker
+  function toMarker(item, sourceType) {
+    const impact   = item.impact || item.attr_category || 'Low';
+    const color    = impact==='High'   ? '#FF1744'
+                   : impact==='Medium' ? '#FFB300'
+                   : sourceType==='espn' ? '#00E5FF'
+                   : '#00E676';
+    const ts = item.received_ts || item.posted_at || item.pubDate || '';
+    if (!ts) return null;
+    return {
+      ts,
+      title:   item.post_text || item.title || '',
+      source:  item.author_handle || item.author_name || item.feed_name || item.creator || '',
+      league:  item.league || item.feed_league || '',
+      impact,
+      color,
+      sourceType,
+      keywords: item.attr_keywords || item.keywords_hit || []
+    };
+  }
+
+  try {
+    // ── Source 1: X/Twitter feed_items — matched by attribution ──
+    const xItems = await FS.getFeedItems({eventId, limit:200});
+    xItems.forEach(item => {
+      const m = toMarker(item, 'x');
+      if (m) markers.push(m);
+    });
+
+    // ── Source 2: ESPN espn_feed ──────────────────────────────────
+    // Try matched_event_id first (populated by EspnPoller performer match)
+    // Fall back to league + performer text filter
+    const evLeague    = ev.league || inferLeague(ev);
+    const performerLc = (ev.performer||'').toLowerCase();
+    const nameParts   = performerLc.split(/\s+/).filter(w => w.length >= 4);
+
+    let espnItems = [];
+    // Try direct event match first
+    const espnDirect = await FS.getEspnItems({eventId, limit:100});
+    if (espnDirect.length > 0) {
+      espnItems = espnDirect;
+    } else if (evLeague) {
+      // Fall back to league filter + text match
+      const espnByLeague = await FS.getEspnItems({league: evLeague, limit:300});
+      espnItems = espnByLeague.filter(item => {
+        const text = ((item.title||'') + ' ' + (item.description||'')).toLowerCase();
+        return nameParts.length === 0 || nameParts.some(p => text.includes(p));
+      });
+    }
+
+    espnItems.forEach(item => {
+      const m = toMarker(item, 'espn');
+      if (m) markers.push(m);
+    });
+
+    // Deduplicate by ts+title
+    const seen = new Set();
+    const deduped = markers.filter(m => {
+      const k = m.ts + m.title.substring(0,30);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+
+    // Sort chronologically
+    deduped.sort((a,b) => a.ts.localeCompare(b.ts));
+    ev.feedMarkers = deduped;
+
+    if (deduped.length > 0) {
+      Logger && Logger.log(`[feedMarkers] ${key}: ${deduped.length} markers (${xItems.length} X + ${markers.length - xItems.length} ESPN)`);
+    }
+
+  } catch(e) {
+    // Firestore not available — fall back to in-memory feedItems text match
+    ev.feedMarkers = buildFallbackMarkers(ev);
+  }
+}
+
+// Infer league from event performer/name for ESPN matching
+function inferLeague(ev) {
+  const text = ((ev.performer||'') + ' ' + (ev.name||'')).toLowerCase();
+  if (/lakers|celtics|knicks|warriors|heat|bucks|76ers|nets|bulls|cavs|nuggets|suns|clippers|pacers|raptors|grizzlies|magic|thunder|jazz|pelicans|spurs|kings|blazers|pistons|hornets|wizards|timberwolves|rockets|mavericks|hawks/.test(text)) return 'NBA';
+  if (/chiefs|eagles|cowboys|patriots|49ers|rams|ravens|bills|bengals|packers|steelers|chargers|raiders|broncos|lions|bears|vikings|saints|giants|jets|commanders|falcons|seahawks|buccaneers|titans|colts|jaguars|texans|dolphins|cardinals/.test(text)) return 'NFL';
+  if (/yankees|dodgers|red sox|cubs|astros|braves|mets|cardinals|phillies|padres|giants|brewers|mariners|rangers|angels|orioles|guardians|twins|royals|athletics|tigers|reds|pirates|nationals|marlins|rockies|diamondbacks|blue jays|rays|white sox/.test(text)) return 'MLB';
+  if (/rangers|bruins|lightning|maple leafs|penguins|capitals|hurricanes|golden knights|avalanche|oilers|flames|canucks|kings|ducks|sharks|blackhawks|red wings|flyers|blues|stars|predators|jets|canadiens|senators|sabres|islanders|devils|wild|kraken/.test(text)) return 'NHL';
+  return '';
+}
+
+// Fallback when Firestore unavailable — use in-memory feedItems text match
+function buildFallbackMarkers(ev) {
+  if (!feedItems || !feedItems.length) return [];
+  const terms = [(ev.name||''),(ev.performer||'')]
+    .flatMap(s => s.toLowerCase().split(/\s+at\s+|\s+vs\.?\s+|\s+@\s+/))
+    .map(s => s.replace(/[^\w\s]/g,'').trim())
+    .filter(s => s.length >= 4);
+  return feedItems
+    .filter(item => {
+      const text = (item.title||'').toLowerCase();
+      return terms.some(t => text.includes(t)) && (item.pubDate||'');
+    })
+    .map(item => ({
+      ts:     item.pubDate||'',
+      title:  item.title||'',
+      source: item.source||item.handle||'',
+      league: item.league||'',
+      impact: item.impact||'Low',
+      color:  item.impact==='High'?'#FF1744':item.impact==='Medium'?'#FFB300':'#00E676',
+      sourceType: 'x'
+    }));
+}
+
+
   const r=tracked[key]; if(!r)return;
   const h=r.history||[],isSG=r.src==='SG',lat=h.length?h[h.length-1]:null,prev=h.length>1?h[h.length-2]:null;
   document.getElementById('det-banner').className=`banner ${isSG?'sg':'te'}`;
@@ -1153,35 +1300,38 @@ function renderChart(r){
   const labels=h.map(s=>{const d=new Date(s.ts);return`${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;});
   if(chart){chart.destroy();chart=null;}
 
-  // Build feed markers — match feedItems to chart timeline ±12h of each snapshot
-  const feedMarkers=[];
-  if(r.name||r.performer){
-    const terms=[(r.name||''),(r.performer||''),(r.venue||'')]
-      .flatMap(s=>s.toLowerCase().split(/\s+at\s+|\s+vs\.?\s+|\s+@\s+/))
-      .map(s=>s.replace(/[^\w\s]/g,'').trim()).filter(s=>s.length>=3);
-    const matchedFeed=feedItems.filter(item=>{
-      const t=(item.title||'').trim();
-      if(t.length<=5||/^pic\.?$|^image$/i.test(t)) return false;
-      const text=[item.title||'',item.source||''].join(' ').toLowerCase();
-      return terms.some(term=>text.includes(term));
+  // Build feed markers — from Firestore-loaded ev.feedMarkers
+  // Markers are loaded by loadEventFeedMarkers() when event is selected.
+  // Each marker has: {ts, title, source, impact, color, sourceType, keywords}
+  const rawMarkers = r.feedMarkers || buildFallbackMarkers(r);
+  const feedMarkers = [];
+
+  rawMarkers.forEach(marker => {
+    const markerTs = new Date(marker.ts).getTime();
+    if (isNaN(markerTs)) return;
+    // Find the nearest snapshot index (within ±6 hours)
+    let bestIdx = -1, bestDiff = 6*3600*1000;
+    h.forEach((snap, i) => {
+      const diff = Math.abs(new Date(snap.ts).getTime() - markerTs);
+      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
     });
-    // For each snapshot, find feed items within ±12 hours
-    h.forEach((snap,i)=>{
-      const snapTs=new Date(snap.ts).getTime();
-      matchedFeed.forEach(item=>{
-        const itemTs=new Date(item.pubDate||0).getTime();
-        if(Math.abs(snapTs-itemTs)<12*3600*1000){
-          const impact=item.impact||'Low';
-          const color=impact==='High'?'#FF1744':impact==='Medium'?'#FFB300':'#00E676';
-          feedMarkers.push({
-            x:i, y:snap.floor||snap.median||snap.avg,
-            label:item.title.substring(0,60)+(item.title.length>60?'...':''),
-            color, impact, source:item.source||''
-          });
-        }
-      });
+    if (bestIdx < 0) return; // no nearby snapshot
+
+    // Use floor price at that snapshot for marker Y position
+    const y = h[bestIdx].floor || h[bestIdx].avg || 0;
+    // Stack multiple markers at same index slightly apart
+    const existing = feedMarkers.filter(m => m.x === bestIdx).length;
+    feedMarkers.push({
+      x:          bestIdx,
+      y:          y * (1 + existing * 0.015), // tiny vertical offset if stacked
+      label:      marker.title.substring(0,70) + (marker.title.length>70?'...':''),
+      source:     marker.source,
+      color:      marker.color,
+      impact:     marker.impact,
+      sourceType: marker.sourceType,
+      keywords:   (marker.keywords||[]).join(', ')
     });
-  }
+  });
 
   const base={responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
     plugins:{legend:{labels:{color:'#5A7A60',font:{family:"'IBM Plex Mono',monospace",size:10},boxWidth:12,padding:14}},
@@ -1191,7 +1341,15 @@ function renderChart(r){
             if(!feedMarkers.length) return [];
             const idx=ctx[0]?.dataIndex;
             const hits=feedMarkers.filter(m=>m.x===idx);
-            return hits.length ? ['','📰 FEED:'].concat(hits.map(m=>`  [${m.impact}] ${m.label}`)) : [];
+            if(!hits.length) return [];
+            const lines = [''];
+            hits.forEach(m => {
+              const src = m.sourceType==='espn' ? '📺 ESPN' : '🐦 X';
+              lines.push(`${src} [${m.impact||'—'}] ${m.label}`);
+              if(m.source) lines.push(`  ${m.source}`);
+              if(m.keywords) lines.push(`  keywords: ${m.keywords}`);
+            });
+            return lines;
           }
         }
       }
@@ -2351,6 +2509,10 @@ function handleFirestoreStreamMessage(msg) {
   if(selKey === key) {
     renderDetail(key); // updates price cards + chart
     setSt(`LIVE UPDATE: ${ev.name} · Floor $${newPoint.floor}`);
+    // Refresh feed markers in background after new snapshot
+    loadEventFeedMarkers(key).then(() => {
+      if(selKey === key) renderChart(tracked[key]);
+    }).catch(()=>{});
   }
 
   // Update next-update timer

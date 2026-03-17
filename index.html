@@ -538,11 +538,11 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 
     <!-- F9 USER SETTINGS -->
     <div class="panel" id="panel-usersettings" style="display:none;overflow-y:auto;">
-      <div class="panel-inner" style="padding:16px 20px;max-width:700px;">
-        <div class="sectitle">USER SETTINGS</div>
+      <div class="panel-inner" style="padding:16px 20px;max-width:760px;">
+        <div class="sectitle">USER SETTINGS <span style="font-size:9px;color:var(--muted);font-weight:400;margin-left:8px;">fully customizable · paste outputs from Claude, ChatGPT, or Gemini</span></div>
 
-        <!-- Last refresh status -->
-        <div style="display:flex;gap:20px;margin:12px 0 20px;padding:10px 14px;border:1px solid var(--border);background:var(--bg2);flex-wrap:wrap;">
+        <!-- Status bar -->
+        <div style="display:flex;gap:20px;margin:10px 0 18px;padding:10px 14px;border:1px solid var(--border);background:var(--bg2);flex-wrap:wrap;">
           <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px;">LAST AUTO-REFRESH</div><div id="us-last-refresh" style="font-size:12px;color:var(--white);">—</div></div>
           <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px;">REFRESH INTERVAL</div><div style="font-size:12px;color:var(--cyan);">Every 60 min</div></div>
           <div><div style="font-size:9px;color:var(--muted);margin-bottom:2px;">TOTAL REFRESHES</div><div id="us-refresh-count" style="font-size:12px;color:var(--white);">—</div></div>
@@ -550,9 +550,36 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
           <div style="margin-left:auto;align-self:center;"><button class="tmbtn" onclick="loadUserSettings()">REFRESH STATUS</button></div>
         </div>
 
-        <!-- Tracked Keywords -->
+        <!-- ── USER VARIABLES ─────────────────────────────────── -->
+        <div class="sectitle">CUSTOM AI CONTEXT
+          <span style="font-size:9px;color:var(--muted);font-weight:400;margin-left:8px;">Claude reads these on every chat — paste JSON from any AI</span>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:8px;line-height:1.7;">
+          Use this prompt in <span style="color:var(--white);">Claude / ChatGPT / Gemini</span> to generate your context block:<br>
+          <div style="margin:6px 0;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-left:3px solid var(--cyan);font-size:10px;color:var(--muted);line-height:1.8;user-select:all;">
+            "I'm a ticket broker using an AI analytics terminal. Generate a JSON context block I should use with my AI analyst. Include fields for: my cost basis rules, margin targets, hold/sell thresholds by days-to-event, preferred venues, leagues I focus on, team priorities, and any custom trading notes. Format it as valid JSON with descriptive keys and realistic placeholder values for a [DESCRIBE YOUR BUSINESS] operation."
+          </div>
+        </div>
+        <textarea id="user-vars-input" class="tminput" rows="10" style="width:100%;font-size:10px;line-height:1.6;resize:vertical;font-family:var(--font);" placeholder='{
+  "business": "mid-size ticket broker, NBA + NFL focus",
+  "margin_target_pct": 20,
+  "cost_basis_floor_usd": 50,
+  "hold_threshold_days": 3,
+  "sell_signal_floor_drop_pct": 10,
+  "preferred_venues": ["Madison Square Garden", "Crypto.com Arena"],
+  "team_priorities": ["Lakers", "Knicks", "Cowboys"],
+  "leagues": ["NBA", "NFL"],
+  "notes": "Avoid holding inventory past 48h pre-event unless margin > 30%"
+}'></textarea>
+        <div style="display:flex;gap:8px;margin:8px 0 20px;">
+          <button class="tmbtn" onclick="saveUserVars()" style="color:var(--green);border-color:var(--green);">SAVE CONTEXT</button>
+          <button class="tmbtn" onclick="previewUserVars()" style="color:var(--cyan);border-color:var(--cyan);">TEST IN CHAT ↗</button>
+          <span id="uv-status" style="font-size:10px;color:var(--muted);align-self:center;"></span>
+        </div>
+
+        <!-- ── TRACKED KEYWORDS ───────────────────────────────── -->
         <div class="sectitle">TRACKED KEYWORDS
-          <span style="font-size:9px;color:var(--muted);font-weight:400;margin-left:8px;">When a feed item matches, it appears in F4 and generates an F6 alert</span>
+          <span style="font-size:9px;color:var(--muted);font-weight:400;margin-left:8px;">Feed alerts when these terms appear in incoming news</span>
         </div>
         <div style="display:flex;gap:8px;margin:8px 0;">
           <input class="tminput" id="kw-input" placeholder="e.g. LeBron, NBA trade, injury report..." style="flex:1;font-size:11px;" onkeydown="if(event.key==='Enter')addKeyword()"/>
@@ -567,24 +594,62 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
           </select>
           <button class="tmbtn" onclick="addKeyword()" style="color:var(--green);border-color:var(--green);">+ ADD</button>
         </div>
-        <div id="kw-list" style="min-height:60px;border:1px solid var(--border);padding:8px;background:var(--bg);margin-bottom:16px;">
+        <div id="kw-list" style="min-height:50px;border:1px solid var(--border);padding:8px;background:var(--bg);margin-bottom:16px;">
           <div style="color:var(--muted);font-size:10px;">Loading keywords...</div>
         </div>
 
-        <!-- Auto-tracked teams from portfolio -->
+        <!-- Auto-tracked teams -->
         <div class="sectitle">AUTO-TRACKED FROM PORTFOLIO
-          <span style="font-size:9px;color:var(--muted);font-weight:400;margin-left:8px;">Feed automatically watches for these based on your tracked events</span>
+          <span style="font-size:9px;color:var(--muted);font-weight:400;margin-left:8px;">Derived from your tracked events automatically</span>
         </div>
-        <div id="auto-tracked-terms" style="padding:8px;border:1px solid var(--border);background:var(--bg);color:var(--muted);font-size:10px;line-height:2;">
+        <div id="auto-tracked-terms" style="padding:8px;border:1px solid var(--border);background:var(--bg);color:var(--muted);font-size:10px;line-height:2;margin-bottom:20px;">
           Loading...
         </div>
 
-        <!-- Trigger setup note -->
-        <div class="sectitle" style="margin-top:20px;">GAS TRIGGER SETUP</div>
+        <!-- ── CUSTOM THEME ───────────────────────────────────── -->
+        <div class="sectitle">CUSTOM THEME
+          <span style="font-size:9px;color:var(--muted);font-weight:400;margin-left:8px;">Paste a CSS :root block — generate one with any AI</span>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:8px;line-height:1.7;">
+          Use this prompt to generate your own theme in <span style="color:var(--white);">Claude / ChatGPT / Gemini</span>:<br>
+          <div style="margin:6px 0;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-left:3px solid var(--purple);font-size:10px;color:var(--muted);line-height:1.8;user-select:all;">
+            "Generate a CSS :root block for a Bloomberg-style ticket analytics terminal. Use IBM Plex Mono font. Keep semantic meanings (--green=positive, --red=negative, --amber=warning). Change all color values to match a [DESCRIBE YOUR VIBE] aesthetic. Return ONLY the :root { } block, nothing else. Variables needed: --bg, --bg2, --bg3, --border, --muted, --white, --green, --red, --amber, --amber2, --cyan, --purple, --rss, --te, --te-bg, --te-bd, --sg, --sg-bg, --sg-bd, --font"
+          </div>
+        </div>
+        <textarea id="theme-css-input" class="tminput" rows="12" style="width:100%;font-size:10px;line-height:1.6;resize:vertical;font-family:var(--font);" placeholder=":root {
+  --bg: #080C0A;
+  --bg2: #0E1410;
+  --bg3: #141C16;
+  --border: #1E2E22;
+  --muted: #5A7A60;
+  --white: #E8F0E8;
+  --green: #00E676;
+  --red: #FF1744;
+  --amber: #FFB300;
+  --amber2: #FF8C00;
+  --cyan: #00E5FF;
+  --purple: #CE93D8;
+  --rss: #FF6B35;
+  --te: #A5D6A7;
+  --te-bg: rgba(165,214,167,0.08);
+  --te-bd: rgba(165,214,167,0.3);
+  --sg: #4FC3F7;
+  --sg-bg: rgba(79,195,247,0.08);
+  --sg-bd: rgba(79,195,247,0.3);
+  --font: 'IBM Plex Mono', monospace;
+}"></textarea>
+        <div style="display:flex;gap:8px;margin:8px 0 20px;flex-wrap:wrap;">
+          <button class="tmbtn" onclick="applyCustomThemeCSS()" style="color:var(--purple);border-color:var(--purple);">APPLY THEME</button>
+          <button class="tmbtn" onclick="exportCurrentTheme()" style="color:var(--cyan);border-color:var(--cyan);">EXPORT CURRENT</button>
+          <button class="tmbtn" onclick="resetCustomThemeCSS()" style="color:var(--muted);">RESET DEFAULT</button>
+          <span id="theme-css-status" style="font-size:10px;color:var(--muted);align-self:center;"></span>
+        </div>
+
+        <!-- GAS Trigger note -->
+        <div class="sectitle">GAS TRIGGER SETUP</div>
         <div style="font-size:10px;color:var(--muted);line-height:1.9;padding:10px 14px;border:1px solid var(--border);background:var(--bg2);">
-          To enable hourly auto-refresh, run <span style="color:var(--white);">setupTriggers()</span> once in the GAS editor.<br>
-          GAS editor → Run → Run function → <span style="color:var(--cyan);">setupTriggers</span><br>
-          This creates a time-based trigger that fires <span style="color:var(--green);">every hour</span>, refreshes all tracked events, and writes a KPI brief to F6.
+          Run <span style="color:var(--white);">setupTriggers()</span> once in GAS editor to enable hourly auto-refresh.<br>
+          GAS editor → Run → Run function → <span style="color:var(--cyan);">setupTriggers</span>
         </div>
       </div>
     </div>
@@ -1150,7 +1215,7 @@ async function sendChat(){
   const thinkId='think-'+Date.now();
   appendChatMsg('ai','<span class="blink">▋</span>',thinkId);
   try{
-    const d=await gasPost({action:'chat',message:msg,history:chatHistory.slice(-10)});
+    const d=await gasPost({action:'chat',message:msg+getUserVarsContext(),history:chatHistory.slice(-6)});
     document.getElementById(thinkId)?.remove();
     if(d.error){ appendChatMsg('ai',`ERROR: ${d.error}`); chatHistory.pop(); }
     else{
@@ -1362,7 +1427,7 @@ async function trackFromChat(eid){
       saveSnap('TE',ev.venue||'',ev.performer||'',String(ev.id),ev.name||'',ev.date||ev.date_local||'',s);
       renderSidebar();
       lines.push('');
-      lines.push(`**Market** — Floor: $${s.floor} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listing groups`);
+      lines.push(`**Market** — Floor: $${s.floor} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listing groups [${statsData.source_label||'TEvo Stats'}]`);
       if(ext.tickets_count>0) lines.push(`${ext.tickets_count.toLocaleString()} tickets · Popularity: ${((ext.popularity_score||0)*100).toFixed(0)}%`);
     }
 
@@ -1431,19 +1496,20 @@ async function fetchChatListings(eid){
 
     if(d.ok && d.stats && d.stats.count>0){
       const s=d.stats, w=d.wholesale_stats||{};
+      const srcLabel=d.source_label||(d.source==='listings'?'TEvo Live':'TEvo Stats');
       const lines=[];
       const dateStr=ev.date?new Date(ev.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
       lines.push(`**${ev.name}**`);
       lines.push(`${ev.venue}${ev.venue_city?', '+ev.venue_city:''} · ${dateStr}`);
       lines.push('');
 
-      // Pricing
-      lines.push(`**Retail** — Floor: $${s.floor} · Median: $${s.median} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listings`);
+      // Pricing with source tag
+      lines.push(`**Retail** — Floor: $${s.floor} · Median: $${s.median} · Avg: $${s.avg} · Max: $${s.max} · ${s.count} listings [${srcLabel}]`);
       if(w.floor&&w.count>0&&(w.floor!==s.floor||w.avg!==s.avg))
         lines.push(`**Wholesale** — Floor: $${w.floor} · Avg: $${w.avg} · Max: $${w.max}`);
       if(d.delivery?.in_hand_count>0||d.delivery?.instant_delivery_count>0)
         lines.push(`${d.delivery.in_hand_count||0} in-hand · ${d.delivery.instant_delivery_count||0} instant delivery`);
-      if(d.source==='stats') lines.push(`_(aggregate stats)_`);
+      if(d.source==='stats') lines.push(`_(aggregate stats — live listings not available)_`);
 
       // Weather
       if(weatherData?.ok){
@@ -1589,8 +1655,113 @@ async function loadUserSettings(){
     }
     renderKeywords(kd.keywords||[]);
     renderAutoTrackedTerms();
+    // Load saved user vars
+    const savedVars=localStorage.getItem('s4k_user_vars');
+    if(savedVars) document.getElementById('user-vars-input').value=savedVars;
+    // Load saved custom theme CSS
+    const savedThemeCSS=localStorage.getItem('s4k_custom_theme_css');
+    if(savedThemeCSS) document.getElementById('theme-css-input').value=savedThemeCSS;
   }catch(e){toast(`Settings load failed: ${e.message}`,'err');}
 }
+
+// ── User Variables ────────────────────────────────────────────────
+function saveUserVars(){
+  const raw=document.getElementById('user-vars-input').value.trim();
+  const status=document.getElementById('uv-status');
+  if(!raw){ localStorage.removeItem('s4k_user_vars'); status.textContent='Cleared.'; return; }
+  try{
+    JSON.parse(raw); // validate
+    localStorage.setItem('s4k_user_vars', raw);
+    status.textContent='Saved ✓ — Claude will use this on next chat message';
+    status.style.color='var(--green)';
+    toast('CONTEXT SAVED');
+  }catch(e){
+    status.textContent='Invalid JSON — check syntax';
+    status.style.color='var(--red)';
+  }
+}
+
+function previewUserVars(){
+  const raw=document.getElementById('user-vars-input').value.trim();
+  try{
+    JSON.parse(raw||'{}');
+    showPanel('intel',document.getElementById('fkey-intel'));
+    switchIntelTab('chat',document.getElementById('itab-chat'));
+    document.getElementById('chat-input').value='What should I know about my current trading context and how does it affect my tracked events?';
+    document.getElementById('chat-input').focus();
+    toast('PREVIEW QUERY LOADED — PRESS SEND');
+  }catch(e){ toast('Fix JSON syntax first','err'); }
+}
+
+function getUserVarsContext(){
+  try{
+    const raw=localStorage.getItem('s4k_user_vars');
+    if(!raw) return '';
+    const vars=JSON.parse(raw);
+    return `\n\nUSER TRADING CONTEXT:\n${JSON.stringify(vars,null,2)}`;
+  }catch(e){ return ''; }
+}
+
+// ── Custom Theme CSS ──────────────────────────────────────────────
+function applyCustomThemeCSS(){
+  const css=document.getElementById('theme-css-input').value.trim();
+  const status=document.getElementById('theme-css-status');
+  if(!css){ status.textContent='Nothing to apply'; return; }
+  // Extract variables from :root block and apply to documentElement
+  try{
+    const match=css.match(/:root\s*\{([^}]+)\}/s)||[null,css];
+    const vars=match[1]||css;
+    let applied=0;
+    vars.split(';').forEach(decl=>{
+      const [k,v]=(decl||'').split(':').map(s=>s.trim());
+      if(k&&k.startsWith('--')&&v){
+        document.documentElement.style.setProperty(k,v);
+        applied++;
+      }
+    });
+    localStorage.setItem('s4k_custom_theme_css', css);
+    status.textContent=`Applied ${applied} variables ✓`;
+    status.style.color='var(--green)';
+    toast('THEME APPLIED');
+  }catch(e){
+    status.textContent=`Error: ${e.message}`;
+    status.style.color='var(--red)';
+  }
+}
+
+function exportCurrentTheme(){
+  const vars=['--bg','--bg2','--bg3','--border','--muted','--white','--green','--red','--amber','--amber2','--cyan','--purple','--rss','--te','--te-bg','--te-bd','--sg','--sg-bg','--sg-bd','--font'];
+  const style=getComputedStyle(document.documentElement);
+  const lines=vars.map(v=>`  ${v}: ${style.getPropertyValue(v).trim()};`).join('\n');
+  const block=`:root {\n${lines}\n}`;
+  document.getElementById('theme-css-input').value=block;
+  navigator.clipboard?.writeText(block).catch(()=>{});
+  toast('CURRENT THEME EXPORTED — PASTE INTO AI TO MODIFY');
+}
+
+function resetCustomThemeCSS(){
+  localStorage.removeItem('s4k_custom_theme_css');
+  // Reset all overrides to stylesheet defaults
+  const vars=['--bg','--bg2','--bg3','--border','--muted','--white','--green','--red','--amber','--amber2','--cyan','--purple','--rss','--te','--te-bg','--te-bd','--sg','--sg-bg','--sg-bd','--font'];
+  vars.forEach(v=>document.documentElement.style.removeProperty(v));
+  document.getElementById('theme-css-input').value='';
+  document.getElementById('theme-css-status').textContent='Reset to default ✓';
+  toast('THEME RESET');
+}
+
+// Load saved custom theme CSS on init
+(function loadSavedThemeCSS(){
+  const saved=localStorage.getItem('s4k_custom_theme_css');
+  if(!saved) return;
+  try{
+    const match=saved.match(/:root\s*\{([^}]+)\}/s)||[null,saved];
+    const vars=match[1]||saved;
+    vars.split(';').forEach(decl=>{
+      const [k,v]=(decl||'').split(':').map(s=>s.trim());
+      if(k&&k.startsWith('--')&&v) document.documentElement.style.setProperty(k,v);
+    });
+  }catch(e){}
+})();
 
 function renderKeywords(keywords){
   const el=document.getElementById('kw-list');

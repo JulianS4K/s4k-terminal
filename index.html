@@ -10,7 +10,7 @@
 <meta name="description" content="S4K Entertainment — Ticket Market Analytics Terminal">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.svg">
-<title>S4K Terminal · Ticket Market Analytics v5.6.2</title>
+<title>S4K Terminal · Ticket Market Analytics Alpha 1.0</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&display=swap');
@@ -277,7 +277,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 <div class="terminal">
 
 <div class="topbar">
-  <span id="term-title" style="font-size:13px;font-weight:600;letter-spacing:0.1em;">S4K TERMINAL <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS v5.6.2</span></span>
+  <span id="term-title" style="font-size:13px;font-weight:600;letter-spacing:0.1em;">S4K TERMINAL <span style="font-size:10px;font-weight:400;opacity:0.7;margin-left:8px;">TICKET MARKET ANALYTICS Alpha 1.0</span></span>
   <div style="display:flex;gap:16px;"><span id="clock"></span><span>NYC</span></div>
 </div>
 
@@ -451,7 +451,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
         <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></div>TERMINAL NAME</div>
         <div class="ifield" style="max-width:300px;"><div class="ilbl">DISPLAY NAME</div><input class="tminput" id="term-name" placeholder="S4K TERMINAL" oninput="applyTermName(this.value)"/></div>
         <div class="sectitle"><div class="sdot" style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></div>MARQUEE <span style="font-size:9px;color:var(--muted);margin-left:6px;">PEAK INTERNET</span></div>
-        <div class="ifield" style="max-width:420px;"><div class="ilbl">SCROLLING MESSAGE (blank to disable)</div><input class="tminput" id="marquee-text" placeholder="S4K TERMINAL · TICKET MARKET ANALYTICS v5.6.2 · " oninput="applyMarquee(this.value)"/></div>
+        <div class="ifield" style="max-width:420px;"><div class="ilbl">SCROLLING MESSAGE (blank to disable)</div><input class="tminput" id="marquee-text" placeholder="S4K TERMINAL · TICKET MARKET ANALYTICS Alpha 1.0 · " oninput="applyMarquee(this.value)"/></div>
         <div id="marquee-preview" style="display:none;overflow:hidden;border:1px solid var(--border);padding:4px 0;margin-top:8px;background:var(--bg2);"><div id="marquee-inner" style="white-space:nowrap;font-size:10px;color:var(--amber);animation:marquee 12s linear infinite;display:inline-block;padding-left:100%;"></div></div>
       </div>
     </div>
@@ -665,7 +665,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // STATE
 // ================================================================
 const CKEY='s4k_v526', TKEY='s4k_theme_v1';
-const APP_VERSION='v5.6.2'; // single source of truth — update on every release
+const APP_VERSION='Alpha 1.0'; // single source of truth — update on every release
 // Migrate GAS URL from any previous CKEY version so users don't lose settings on version bump
 (function migrateCreds(){
   if(localStorage.getItem(CKEY)) return; // already on current version

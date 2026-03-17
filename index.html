@@ -692,7 +692,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // STATE
 // ================================================================
 const CKEY='s4k_v526', TKEY='s4k_theme_v1';
-const APP_VERSION='Alpha 1.7'; // single source of truth — update on every release
+const APP_VERSION='Alpha 1.8'; // single source of truth — update on every release
 // Migrate GAS URL from any previous CKEY version so users don't lose settings on version bump
 (function migrateCreds(){
   if(localStorage.getItem(CKEY)) return; // already on current version
@@ -1120,14 +1120,19 @@ async function loadAllHistories(){
 }
 async function loadHistory(key){
   const ev=tracked[key]; if(!ev) return;
-  // Try Firestore first, then GAS Sheets fallback
   let loaded = false;
+
+  // ── Try Firestore ─────────────────────────────────────────────
+  // Requires composite index: tevo/ → event_id ASC, snapshot_ts DESC
+  // If index missing: Firestore returns HTTP 400 → falls through to GAS.
+  // Create index: Firebase Console → Firestore → Indexes → Composite
+  //   Collection: tevo | event_id ASC | snapshot_ts DESC
   try {
-    const snaps = await FS.getEventSnapshots(ev.event_id, 500);
-    if(snaps && snaps.length > 0) {
+    const snaps = await FS.getEventSnapshots(ev.event_id, 1000);
+    if(snaps && snaps.length > 0){
       ev.history = snaps
         .map(s=>({
-          ts:     s.snapshot_ts||s.received_ts||'',
+          ts:     s.snapshot_ts||'',
           floor:  Math.round(Number(s.floor||0)),
           avg:    Math.round(Number(s.avg||0)),
           median: Math.round(Number(s.median||0)),
@@ -1135,32 +1140,35 @@ async function loadHistory(key){
           count:  Math.round(Number(s.count||0))
         }))
         .filter(s=>s.floor>0 && s.avg>0 && !isNaN(s.floor))
-        .map(s=>({
-          ...s,
-          // Cap max at 20x floor — anything higher is a data anomaly
-          // (parking tickets, premium packages mixed in)
-          max: s.max > s.floor * 20 ? s.avg * 3 : s.max
-        }))
+        .map(s=>({...s, max: s.max > s.floor*20 ? s.avg*3 : s.max}))
         .sort((a,b)=>a.ts.localeCompare(b.ts));
       loaded = true;
     }
-  } catch(fsErr) {
-    // Firestore not ready yet — token endpoint needs new deploy
-  }
-  if(!loaded) {
-    // Fallback: GAS reads from Sheets TE_snapshots
+  } catch(fsErr) {}
+
+  // ── GAS fallback — reads all rows from Sheets ─────────────────
+  if(!loaded){
     try {
-      const d = await gasGet({action:'history', src:ev.src, event_id:ev.event_id});
+      const d = await gasGet({action:'history', src:ev.src||'TE', event_id:ev.event_id});
       ev.history = (d.rows||[])
         .map(r=>({
-          ts:r.snapshot_ts, floor:Math.round(Number(r.floor)||0),
-          avg:Math.round(Number(r.avg)||0), median:Math.round(Number(r.median)||0),
-          max:Math.round(Number(r.max)||0), count:Math.round(Number(r.count)||0)
+          ts:     String(r.snapshot_ts||''),
+          floor:  Math.round(Number(r.floor||0)),
+          avg:    Math.round(Number(r.avg||0)),
+          median: Math.round(Number(r.median||0)),
+          max:    Math.round(Number(r.max||0)),
+          count:  Math.round(Number(r.count||0))
         }))
-        .filter(s=>s.floor>0 && s.avg>0 && !isNaN(s.floor));
-    } catch(gasErr) { ev.history=[]; }
+        .filter(s=>s.floor>0 && s.avg>0 && !isNaN(s.floor))
+        .map(s=>({...s, max: s.max > s.floor*20 ? s.avg*3 : s.max}))
+        .sort((a,b)=>a.ts.localeCompare(b.ts));
+    } catch(gasErr){ ev.history=[]; }
   }
+
+  // Re-render chart immediately if this is the selected event
+  if(selKey===key && (ev.history||[]).length>0) renderDetail(key);
 }
+
 async function saveSnap(src,venue,perf,eid,name,date,stats,dataSource){
   const key = src==='TE' ? `TE::${eid}` : skey(src,venue,perf,eid);
   const ev=tracked[key]||{key,src,event_id:eid,name,venue,performer:perf,date,added_at:new Date().toISOString(),history:[]};
@@ -1489,12 +1497,16 @@ function renderChart(r){
 }
 function updateTotal(){ const t=Object.values(tracked).reduce((a,r)=>a+(r.history||[]).length,0); document.getElementById('snaptotal').textContent=`${t} SNAPSHOT${t!==1?'S':''}`; }
 async function refreshSelected(){
-  if(!selKey)return;
-  const r=tracked[selKey]; if(!r)return;
+  if(!selKey) return;
+  const r=tracked[selKey]; if(!r) return;
   if(r.src==='SG'){ toast('SeatGeek disabled — remove and re-add via TEvo','err'); return; }
   setSt(`REFRESHING ${r.name}...`);
-  await fetchTE(r.event_id,r.name,r.venue,r.performer,r.date);
+  // Fetch fresh live snapshot (writes new row to Sheets + Firestore)
+  await fetchTE(r.event_id, r.name, r.venue, r.performer, r.date);
+  // Reload full history so chart shows ALL data points not just the new one
+  await loadHistory(selKey);
   renderDetail(selKey);
+  setSt('READY');
 }
 async function removeSelected(){
   if(!selKey)return; try{await gasPost({action:'untrack',key:selKey});}catch(e){}

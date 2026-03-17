@@ -1,0 +1,38 @@
+{
+  "name": "S4K Terminal",
+  "short_name": "S4K",
+  "description": "S4K Entertainment \u2014 Ticket Market Analytics Terminal",
+  "start_url": "/s4k-terminal/",
+  "display": "standalone",
+  "background_color": "#080C0A",
+  "theme_color": "#080C0A",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Open Chat",
+      "short_name": "Chat",
+      "description": "Open S4K Intelligence chat",
+      "url": "/s4k-terminal/#chat"
+    },
+    {
+      "name": "Open Feed",
+      "short_name": "Feed",
+      "description": "Open demand feed",
+      "url": "/s4k-terminal/#feed"
+    }
+  ]
+}

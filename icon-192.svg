@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
+  <rect width="192" height="192" fill="#080C0A"/>
+  <rect x="16" y="16" width="160" height="160" rx="24" fill="#0E1410" stroke="#1A2E1E" stroke-width="1"/>
+  <text x="96" y="80" text-anchor="middle" font-family="monospace" font-size="32" font-weight="600" fill="#00E676">S4K</text>
+  <text x="96" y="116" text-anchor="middle" font-family="monospace" font-size="13" fill="#2ECC71">TERMINAL</text>
+  <rect x="40" y="130" width="112" height="1.5" fill="#1A2E1E"/>
+  <text x="96" y="152" text-anchor="middle" font-family="monospace" font-size="10" fill="#555">TICKET MARKET</text>
+</svg>

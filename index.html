@@ -1245,7 +1245,14 @@ async function loadHistory(key) {
       // Only trust Firestore result if it contains valid priced snapshots.
       // Old broken docs (0:"3" format) map to floor=0 and filter out.
       // Fall through to GAS if nothing survives the filter.
-      if (mapped.length > 0) { ev.history = mapped; loaded = true; }
+      if (mapped.length > 0) {
+        // Sanity filter: remove data points where floor << avg (parking leak)
+        const validAvg = mapped.reduce((s,p)=>s+(p.avg||0),0) / mapped.length;
+        const cleaned  = validAvg > 50
+          ? mapped.filter(p => p.floor >= validAvg / 8)
+          : mapped;
+        if (cleaned.length > 0) { ev.history = cleaned; loaded = true; }
+      }
     }
   } catch(e) {}
 
@@ -2238,18 +2245,33 @@ async function startRealtimeListener() {
     listenToTevo(token,pid);
   } catch(e) {
     // Fall back to polling
+    // Polling fallback: check Firestore event_index every 5 min for new snapshot timestamps
     snapshotPollTimer=setInterval(async()=>{
-      try{
-        const d=await gasGet({action:'get_settings'});
-        if(d.ok&&d.last_auto_refresh&&d.last_auto_refresh!==lastSnapshotTs){
-          lastSnapshotTs=d.last_auto_refresh;
-          await loadAllHistories();
-          renderSidebar();
-          if(selKey){renderDetail(selKey);renderChart(tracked[selKey]);}
-          setSt('Updated '+new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}));
+      try {
+        // Check event_index for any last_snapshot_ts newer than what we have in memory
+        const trackedKeys = Object.keys(tracked);
+        if (!trackedKeys.length) return;
+        let anyNew = false;
+        for (const key of trackedKeys) {
+          const ev = tracked[key];
+          if (!ev.event_id) continue;
+          const idx = await FS.getEventIndex(ev.event_id);
+          if (!idx) continue;
+          const fsTs   = idx.last_snapshot_ts || '';
+          const memTs  = (ev.history||[]).slice(-1)[0]?.ts || '';
+          if (fsTs && fsTs > memTs) {
+            // New snapshot available — reload this event's history
+            await loadHistory(key);
+            anyNew = true;
+          }
         }
-      }catch(e){}
-    },5*60*1000);
+        if (anyNew) {
+          renderSidebar();
+          if (selKey) { renderDetail(selKey); renderChart(tracked[selKey]); }
+          setSt('Updated ' + new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}));
+        }
+      } catch(e) {}
+    }, 5*60*1000);
   }
 }
 
@@ -2294,9 +2316,18 @@ async function listenToTevo(token,pid) {
           const key=Object.keys(tracked).find(k=>String(tracked[k].event_id)===String(snap.event_id));
           if(!key) continue;
           const ev=tracked[key];
-          const np={ts:snap.snapshot_ts||new Date().toISOString(),
-            floor:Math.round(snap.floor||0),avg:Math.round(snap.avg||0),
-            median:Math.round(snap.median||0),max:Math.round(snap.max||0),count:Math.round(snap.count||0)};
+          const np={
+            ts:           snap.snapshot_ts||new Date().toISOString(),
+            floor:        Math.round(snap.floor||0),
+            avg:          Math.round(snap.avg||0),
+            median:       Math.round(snap.median||0),
+            max:          Math.round(snap.max||0),
+            count:        Math.round(snap.count||0),
+            source_label: snap.meta?.data_source==='stats' ? 'TEvo Stats' : 'TEvo Live',
+            // Carry owned/parking through from the Firestore doc's data map
+            owned:   snap.data?.owned_stats  ? {count:snap.data.owned_count||0, stats:snap.data.owned_stats}  : (ev.history?.slice(-1)[0]?.owned  || null),
+            parking: snap.data?.parking_stats ? {count:snap.data.parking_count||0, stats:snap.data.parking_stats} : (ev.history?.slice(-1)[0]?.parking || null),
+          };
           if(np.floor<=0||isNaN(np.floor)) continue;
           if((ev.history||[]).some(h=>h.ts===np.ts)) continue;
           if(!ev.history) ev.history=[];
@@ -2306,11 +2337,9 @@ async function listenToTevo(token,pid) {
           if(selKey===key){
             renderDetail(key);
             renderChart(ev);
-            // Flash live badge + status
             const badge=document.getElementById('live-badge');
             if(badge){badge.style.display='inline';badge.style.opacity='1';}
             setSt(`● Live — ${ev.name} · Floor ${fmt(np.floor)} · ${fmtC(np.count)} listings`);
-            // Show toast for significant floor change
             const prev=ev.history[ev.history.length-2];
             if(prev&&Math.abs(np.floor-prev.floor)>=5){
               const dir=np.floor>prev.floor?'▲':'▼';
@@ -2349,6 +2378,21 @@ async function init() {
 
   // Auto-refresh feed every 15 minutes (matches GAS espnPollTrigger cadence)
   setInterval(() => loadFeed(true).catch(()=>{}), 15 * 60 * 1000);
+
+  // When tab becomes visible again after being hidden, check for new data
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && selKey && tracked[selKey]) {
+      const memTs = (tracked[selKey].history||[]).slice(-1)[0]?.ts || '';
+      const minsStale = memTs ? (Date.now() - new Date(memTs)) / 60000 : 999;
+      if (minsStale > 10) {
+        // Been away > 10 min — silently reload history for all events
+        loadAllHistories().then(() => {
+          renderSidebar();
+          if (selKey) { renderDetail(selKey); renderChart(tracked[selKey]); }
+        }).catch(()=>{});
+      }
+    }
+  });
 }
 
 window.addEventListener('load', init);

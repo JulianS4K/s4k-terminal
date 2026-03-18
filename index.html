@@ -405,7 +405,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   <div class="topbar-right">
     <span id="st-bar"></span>
     <span id="clock"></span>
-    <span class="ver-pill" id="ver-badge">Alpha 3.0</span>
+    <span class="ver-pill" id="ver-badge">Alpha 3.1</span>
   </div>
 </div>
 
@@ -716,7 +716,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 
 // ── State ──────────────────────────────────────────────────────
 const CKEY = 's4k_a30';
-const APP_VERSION = 'Alpha 3.0';
+const APP_VERSION = 'Alpha 3.1';
 
 // Migrate GAS URL from previous versions
 (function migrate() {
@@ -929,19 +929,19 @@ const FS = (() => {
       ? buildFilter(filters[0])
       : {compositeFilter:{op:'AND', filters: filters.map(buildFilter)}};
 
-    // IMPORTANT: Omit orderBy from the Firestore query when we have a filter.
-    // filter + orderBy on different fields requires a composite index.
-    // Without the index Firestore returns HTTP 400 — we silently fall to GAS
-    // and miss all historical data. Instead: fetch unordered, sort client-side.
-    // The composite index (event_id ASC, snapshot_ts DESC) can be added later
-    // for performance, but correctness comes first.
+    // Composite index tevo(event_id ASC, snapshot_ts DESC) exists in Firestore.
+    // We can now send filter + orderBy together for tevo/ queries.
+    // For other collections without composite indexes, we still sort client-side.
+    const INDEXED_COLLECTIONS = new Set(['tevo']);
+    const canUseServerOrder = orderBy.length > 0 &&
+      (INDEXED_COLLECTIONS.has(collection) || !filters.length);
+
     const structuredQuery = {
       from:  [{collectionId: collection}],
       limit: {value: limit},
     };
     if (filters.length) structuredQuery.where = where;
-    // Only add server-side orderBy when there are NO filters (no index needed then)
-    if (!filters.length && orderBy.length) {
+    if (canUseServerOrder) {
       structuredQuery.orderBy = orderBy.map(o=>({
         field:{fieldPath:o.field}, direction:o.dir||'DESCENDING'
       }));
@@ -958,8 +958,8 @@ const FS = (() => {
       .filter(row => row.document)
       .map(row => decodeDoc(row.document));
 
-    // Client-side sort — applies the orderBy that we omitted from the server query
-    if (orderBy.length && docs.length > 1) {
+    // Client-side sort only when server didn't apply orderBy
+    if (!canUseServerOrder && orderBy.length && docs.length > 1) {
       docs.sort((a, b) => {
         for (const {field, dir} of orderBy) {
           const av = a[field]||'', bv = b[field]||'';
@@ -984,7 +984,10 @@ const FS = (() => {
   // ── Convenience methods ────────────────────────────────────────
 
   // Latest N price snapshots for an event from tevo/ collection
-  async function getEventSnapshots(eventId, limit=100) {
+  async function getEventSnapshots(eventId, limit=500) {
+    // Composite index tevo(event_id ASC, snapshot_ts DESC) — server-side order works.
+    // Limit 500: at 15-min cadence that's ~5 days of history, plenty for the chart.
+    // Returns newest first (DESCENDING) — loadHistory sorts ASC for chart rendering.
     return query('tevo',
       [{field:'event_id', op:'EQUAL', value:String(eventId)}],
       [{field:'snapshot_ts', dir:'DESCENDING'}],
@@ -1196,7 +1199,7 @@ async function loadTracked() {
             const ev = tracked[key];
             if (!ev.event_id) continue;
             const idx   = await FS.getEventIndex(ev.event_id);
-            const fsTs  = idx?.last_snapshot_ts || '';
+            const fsTs  = idx?.last_snapshot_ts || idx?.last_updated || '';
             const memTs = (ev.history||[]).slice(-1)[0]?.ts || '';
             if (fsTs && fsTs > memTs) {
               await loadHistory(key);
@@ -2295,7 +2298,9 @@ async function startRealtimeListener() {
         if (!ev.event_id) continue;
         try {
           const idx   = await FS.getEventIndex(ev.event_id);
-          const fsTs  = idx?.last_snapshot_ts || '';
+          // last_snapshot_ts is the canonical field; last_updated is the fallback
+          // for event_index docs written before last_snapshot_ts was added
+          const fsTs  = idx?.last_snapshot_ts || idx?.last_updated || '';
           const memTs = (ev.history||[]).slice(-1)[0]?.ts || '';
           if (fsTs && fsTs > memTs) {
             await loadHistory(key);

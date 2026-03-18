@@ -386,7 +386,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   <div class="topbar-right">
     <span id="st-bar"></span>
     <span id="clock"></span>
-    <span class="ver-pill" id="ver-badge">Alpha 2.4</span>
+    <span class="ver-pill" id="ver-badge">Alpha 2.5</span>
   </div>
 </div>
 
@@ -615,13 +615,13 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // ================================================================
 
 // ── State ──────────────────────────────────────────────────────
-const CKEY = 's4k_a24';
-const APP_VERSION = 'Alpha 2.4';
+const CKEY = 's4k_a25';
+const APP_VERSION = 'Alpha 2.5';
 
 // Migrate GAS URL from previous versions
 (function migrate() {
   if (localStorage.getItem(CKEY)) return;
-  for (const k of ['s4k_a23','s4k_a22','s4k_a21','s4k_a20']) {
+  for (const k of ['s4k_a24','s4k_a23','s4k_a22','s4k_a21']) {
     const v = localStorage.getItem(k);
     if (v) { localStorage.setItem(CKEY, v); break; }
   }
@@ -1048,7 +1048,12 @@ async function loadTracked() {
 
 async function loadAllHistories() {
   await Promise.allSettled(Object.keys(tracked).map(async k => {
+    // Mark as attempted (empty array) before fetching so sidebar shows "No snapshots"
+    // instead of "Loading..." if the fetch returns nothing
+    if (!tracked[k].history) tracked[k].history = null; // null = in-flight
     await loadHistory(k);
+    // After loadHistory, history is either filled or [] — never null
+    if (!tracked[k].history) tracked[k].history = [];
     renderSidebar();
   }));
 }
@@ -1082,7 +1087,7 @@ async function loadHistory(key) {
   if (!loaded) {
     try {
       const d = await gasGet({action:'history', src:'TE', event_id:ev.event_id});
-      ev.history = (d.rows||[])
+      const gasRows = (d.rows||[])
         .map(r => ({
           ts:String(r.snapshot_ts||''),
           floor:Math.round(Number(r.floor||0)),
@@ -1094,8 +1099,22 @@ async function loadHistory(key) {
         .filter(s => s.floor>0 && s.avg>0)
         .map(s => ({...s, max: s.max>s.floor*20 ? s.avg*3 : s.max}))
         .sort((a,b) => a.ts.localeCompare(b.ts));
-    } catch(e) { ev.history = []; }
+      // Only overwrite if GAS returned real data — never wipe good in-memory points
+      if (gasRows.length > 0) {
+        // Merge: keep in-memory points not yet in GAS result (written this session)
+        const gasTimes = new Set(gasRows.map(r=>r.ts));
+        const inMemOnly = (ev.history||[]).filter(r=>!gasTimes.has(r.ts) && r.floor>0);
+        ev.history = [...gasRows, ...inMemOnly].sort((a,b)=>a.ts.localeCompare(b.ts));
+        loaded = true;
+      }
+    } catch(e) {
+      // GAS errored — keep whatever we have in memory, don't wipe it
+    }
   }
+
+  // If still no data after both paths, initialize to empty (don't leave undefined)
+  if (!ev.history) ev.history = [];
+
   if (selKey===key && ev.history.length>0) renderDetail(key);
 }
 
@@ -1110,11 +1129,24 @@ function renderSidebar() {
   el.innerHTML = keys.map(k => {
     const r = tracked[k];
     const h = (r.history||[]).filter(s=>s.floor>0);
-    if (!h.length) return `<div class="ev-card src-te${k===selKey?' active':''}" onclick="selectEvent('${k}')">
-      <div class="ev-name">${r.name}</div>
-      <div class="ev-venue">${(r.venue||'').replace(/_/g,' ').substring(0,32)}</div>
-      <div class="ev-row2"><span class="ev-pill te">TE</span><span style="color:var(--muted);font-size:10px;">Loading…<span class="blink">_</span></span></div>
-    </div>`;
+    if (!h.length) {
+      // history=[] can mean: (a) still loading, (b) loaded but no valid snaps yet
+      // Check if history array exists (even empty) vs truly uninitialized
+      const isLoading = !r.history;  // null/undefined = not yet attempted
+      const hasNoData = r.history && r.history.length === 0;
+      const hasBadData = r.history && r.history.length > 0 && !h.length;
+      const label = isLoading ? 'Loading…' : hasBadData ? 'No valid data' : 'No snapshots yet';
+      return `<div class="ev-card src-te${k===selKey?' active':''}" onclick="selectEvent('${k}')">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+          <div class="ev-name" title="${r.name}">${r.name}</div>
+          <span class="ev-pill te">TE</span>
+        </div>
+        <div class="ev-venue">${(r.venue||'').replace(/_/g,' ').substring(0,32)}</div>
+        <div class="ev-row2">
+          <span style="color:var(--muted);font-size:10px;">${label}${isLoading?'<span class="blink">_</span>':''}</span>
+        </div>
+      </div>`;
+    }
     const lat=h[h.length-1], prev=h.length>1?h[h.length-2]:null;
     const fd = prev ? lat.floor-prev.floor : 0;
     // News badge
@@ -1491,9 +1523,13 @@ async function refreshSelected() {
       // Write to Sheets + Firestore in background
       gasPost({action:'snapshot',src:'TE',snapshot:snap}).catch(()=>{});
     }
-    // Reload full history to get all historical points
+    // Reload full history — merges Sheets data with the in-memory point we just added
     await loadHistory(selKey);
-    renderDetail(selKey); renderChart(tracked[selKey]);
+    // Only re-render if we actually have data — don't wipe the chart if loadHistory
+    // couldn't get anything from Firestore or GAS
+    if (tracked[selKey] && (tracked[selKey].history||[]).filter(s=>s.floor>0).length > 0) {
+      renderDetail(selKey); renderChart(tracked[selKey]);
+    }
     setSt('Ready');
   } catch(e) { toast('Refresh failed: '+e.message,'err'); setSt('Ready'); }
   btn.disabled=false; btn.textContent='Refresh';
@@ -1558,7 +1594,7 @@ async function searchTE() {
         <div class="sr-actions">
           <button class="track-btn${isTracked?' tracked':''}" 
             id="tr-${ev.id}" ${isTracked?'disabled':''}
-            onclick="trackEvent(${ev.id},'${(ev.name||'').replace(/'/g,'')}','${(ev.venue?.name||'').replace(/'/g,'')}','${(ev.performances?.[0]?.performer?.name||'').replace(/'/g,'')}','${ev.occurs_at||''}')"
+            onclick="trackEvent(${ev.id},'${(ev.name||'').replace(/'/g,'')}','${(ev.venue?.name||'').replace(/'/g,'')}','${(ev.venue?.location||'').replace(/'/g,'')}','${ev.venue?.id||''}','${(ev.performances?.[0]?.name||'').replace(/'/g,'')}','${ev.performances?.[0]?.performer_id||''}','${ev.occurs_at||''}')"
           >${isTracked?'Tracked ✓':'Track'}</button>
         </div>
       </div>`;
@@ -1566,16 +1602,19 @@ async function searchTE() {
   } catch(e){ hint.textContent='Search failed: '+e.message; }
 }
 
-async function trackEvent(eid,name,venue,perf,date) {
+async function trackEvent(eid,name,venue,venueLocation,venueId,perf,perfId,date) {
   const btn=document.getElementById('tr-'+eid);
   if(btn){btn.textContent='Tracking…';btn.disabled=true;}
   try {
     const key=`TE::${eid}`;
     const evRecord={
-      key,src:'TE',event_id:String(eid),name,
-      venue_id:'v_'+venue.replace(/[^\w]/g,'_').substring(0,30).toLowerCase(),
-      venue,venue_city:'',performer_id:'p_'+perf.replace(/[^\w]/g,'_').substring(0,30).toLowerCase(),
-      performer:perf,date,added_at:new Date().toISOString(),history:[]
+      key, src:'TE', event_id:String(eid), name,
+      venue_id:     String(venueId||''),
+      venue,
+      venue_city:   venueLocation||'',
+      performer_id: String(perfId||''),
+      performer:    perf,
+      date, added_at:new Date().toISOString(), history:[]
     };
     await gasPost({action:'track',event:evRecord});
     tracked[key]=evRecord;

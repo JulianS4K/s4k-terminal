@@ -1219,14 +1219,26 @@ async function loadHistory(key) {
     const snaps = await FS.getEventSnapshots(ev.event_id, 1000);
     if (snaps && snaps.length > 0) {
       const mapped = snaps
-        .map(s => ({
-          ts:     s.snapshot_ts||'',
-          floor:  Math.round(Number(s.floor||0)),
-          avg:    Math.round(Number(s.avg||0)),
-          median: Math.round(Number(s.median||0)),
-          max:    Math.round(Number(s.max||0)),
-          count:  Math.round(Number(s.count||0))
-        }))
+        .map(s => {
+          // owned_stats may be in s.data.owned_stats (Firestore map field) or s.owned
+          const ownedStats = s.data?.owned_stats || s.owned_stats || null;
+          const ownedCount = s.data?.owned_count ?? s.owned_count ?? 0;
+          return {
+            ts:           s.snapshot_ts||'',
+            floor:        Math.round(Number(s.floor||0)),
+            avg:          Math.round(Number(s.avg||0)),
+            median:       Math.round(Number(s.median||0)),
+            max:          Math.round(Number(s.max||0)),
+            count:        Math.round(Number(s.count||0)),
+            source_label: s.meta?.data_source==='stats' ? 'TEvo Stats' : 'TEvo Live',
+            pages_fetched: 0,
+            owned: {
+              count: Number(ownedCount||0),
+              stats: ownedStats
+            },
+            parking: s.parking || {count:0, stats:null}
+          };
+        })
         .filter(s => s.floor>0 && s.avg>0)
         .map(s => ({...s, max: s.max>s.floor*20 ? s.avg*3 : s.max}))
         .sort((a,b) => a.ts.localeCompare(b.ts));
@@ -1594,6 +1606,42 @@ function renderChart(r) {
 }
 
 // ── Feed markers ────────────────────────────────────────────────
+// ── Client-side league-gated team matching ───────────────────────
+// Mirrors GAS matchEspnItemToEvent. Two-filter chain:
+//   1. feed_league must match event category (kills "Miami Open" → NBA)
+//   2. full team name or unique nickname — city names never used alone
+const CLIENT_TEAM_MAP = {
+  'NFL': {'Arizona Cardinals':[],'Atlanta Falcons':['Falcons'],'Baltimore Ravens':['Ravens'],'Buffalo Bills':['Bills'],'Carolina Panthers':['Panthers'],'Chicago Bears':['Bears'],'Cincinnati Bengals':['Bengals'],'Cleveland Browns':['Browns'],'Dallas Cowboys':['Cowboys'],'Denver Broncos':['Broncos'],'Detroit Lions':['Lions'],'Green Bay Packers':['Packers'],'Houston Texans':['Texans'],'Indianapolis Colts':['Colts'],'Jacksonville Jaguars':['Jaguars'],'Kansas City Chiefs':['Chiefs'],'Las Vegas Raiders':['Raiders'],'Los Angeles Chargers':['Chargers'],'Los Angeles Rams':['Rams'],'Miami Dolphins':['Dolphins'],'Minnesota Vikings':['Vikings'],'New England Patriots':['Patriots'],'New Orleans Saints':['Saints'],'New York Giants':[],'New York Jets':['Jets'],'Philadelphia Eagles':['Eagles'],'Pittsburgh Steelers':['Steelers'],'San Francisco 49ers':['49ers'],'Seattle Seahawks':['Seahawks'],'Tampa Bay Buccaneers':['Buccaneers','Bucs'],'Tennessee Titans':['Titans'],'Washington Commanders':['Commanders']},
+  'NBA': {'Atlanta Hawks':['Hawks'],'Boston Celtics':['Celtics'],'Brooklyn Nets':['Nets'],'Charlotte Hornets':['Hornets'],'Chicago Bulls':['Bulls'],'Cleveland Cavaliers':['Cavaliers','Cavs'],'Dallas Mavericks':['Mavericks','Mavs'],'Denver Nuggets':['Nuggets'],'Detroit Pistons':['Pistons'],'Golden State Warriors':['Warriors'],'Houston Rockets':['Rockets'],'Indiana Pacers':['Pacers'],'Los Angeles Clippers':['Clippers'],'Los Angeles Lakers':['Lakers'],'Memphis Grizzlies':['Grizzlies'],'Miami Heat':['Heat'],'Milwaukee Bucks':['Bucks'],'Minnesota Timberwolves':['Timberwolves','Wolves'],'New Orleans Pelicans':['Pelicans'],'New York Knicks':['Knicks'],'Oklahoma City Thunder':['Thunder'],'Orlando Magic':['Magic'],'Philadelphia 76ers':['76ers','Sixers'],'Phoenix Suns':['Suns'],'Portland Trail Blazers':['Trail Blazers','Blazers'],'Sacramento Kings':[],'San Antonio Spurs':['Spurs'],'Toronto Raptors':['Raptors'],'Utah Jazz':['Jazz'],'Washington Wizards':['Wizards']},
+  'MLB': {'Arizona Diamondbacks':['Diamondbacks','Dbacks'],'Atlanta Braves':['Braves'],'Baltimore Orioles':['Orioles'],'Boston Red Sox':['Red Sox'],'Chicago Cubs':['Cubs'],'Chicago White Sox':['White Sox'],'Cincinnati Reds':['Reds'],'Cleveland Guardians':['Guardians'],'Colorado Rockies':['Rockies'],'Detroit Tigers':['Tigers'],'Houston Astros':['Astros'],'Kansas City Royals':['Royals'],'Los Angeles Angels':['Angels'],'Los Angeles Dodgers':['Dodgers'],'Miami Marlins':['Marlins'],'Milwaukee Brewers':['Brewers'],'Minnesota Twins':['Twins'],'New York Mets':['Mets'],'New York Yankees':['Yankees'],'Oakland Athletics':['Athletics'],'Philadelphia Phillies':['Phillies'],'Pittsburgh Pirates':['Pirates'],'San Diego Padres':['Padres'],'San Francisco Giants':[],'Seattle Mariners':['Mariners'],'St. Louis Cardinals':[],'Tampa Bay Rays':['Rays'],'Texas Rangers':[],'Toronto Blue Jays':['Blue Jays'],'Washington Nationals':['Nationals']},
+  'NHL': {'Anaheim Ducks':['Ducks'],'Boston Bruins':['Bruins'],'Buffalo Sabres':['Sabres'],'Calgary Flames':['Flames'],'Carolina Hurricanes':['Hurricanes','Canes'],'Chicago Blackhawks':['Blackhawks'],'Colorado Avalanche':['Avalanche','Avs'],'Columbus Blue Jackets':['Blue Jackets'],'Dallas Stars':['Stars'],'Detroit Red Wings':['Red Wings'],'Edmonton Oilers':['Oilers'],'Florida Panthers':[],'Los Angeles Kings':[],'Minnesota Wild':['Wild'],'Montreal Canadiens':['Canadiens','Habs'],'Nashville Predators':['Predators','Preds'],'New Jersey Devils':['Devils'],'New York Islanders':['Islanders'],'New York Rangers':[],'Ottawa Senators':['Senators'],'Philadelphia Flyers':['Flyers'],'Pittsburgh Penguins':['Penguins'],'San Jose Sharks':['Sharks'],'Seattle Kraken':['Kraken'],'St. Louis Blues':['Blues'],'Tampa Bay Lightning':['Lightning'],'Toronto Maple Leafs':['Maple Leafs','Leafs'],'Vancouver Canucks':['Canucks'],'Vegas Golden Knights':['Golden Knights'],'Washington Capitals':['Capitals'],'Winnipeg Jets':[]}
+};
+
+function feedMatchesEvent(item, ev) {
+  // Trust Firestore-matched items unconditionally
+  if (item.event_id && String(item.event_id) === String(ev.event_id)) return true;
+
+  const itemLeague = (item.league || item.feed_league || '').toUpperCase();
+  const evCat      = (ev.category || '').toUpperCase();
+
+  // Filter 1: League gate — NBA feed never matches NFL event
+  if (itemLeague && evCat && itemLeague !== evCat) return false;
+
+  // Filter 2: Team name / unique nickname — word-boundary safe
+  const text      = ((item.title||'')+' '+(item.desc||'')).toLowerCase();
+  const performer = (ev.performer || '').trim();
+  if (!performer) return false;
+
+  const nickMap = CLIENT_TEAM_MAP[evCat] || CLIENT_TEAM_MAP[itemLeague] || null;
+  const nicks   = nickMap ? (nickMap[performer] || []) : [];
+  const terms   = [performer, ...nicks];
+
+  return terms.some(term => {
+    const esc = term.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    return new RegExp('(?:^|[^a-z])' + esc + '(?:[^a-z]|$)').test(text);
+  });
+}
+
 function inferLeague(ev) {
   const text = ((ev.performer||'') + ' ' + (ev.name||'')).toLowerCase();
   if (/lakers|celtics|knicks|warriors|heat|bucks|76ers|nets|bulls|cavs|nuggets|suns|clippers|pacers|raptors|grizzlies|magic|thunder|jazz|pelicans|spurs|kings|blazers|pistons|hornets|wizards|timberwolves|rockets|mavericks|hawks/.test(text)) return 'NBA';
@@ -1605,14 +1653,10 @@ function inferLeague(ev) {
 
 function buildFallbackMarkers(ev) {
   if (!feedItems || !feedItems.length) return [];
-  const terms = [(ev.name||''),(ev.performer||'')]
-    .flatMap(s => s.toLowerCase().split(/\s+at\s+|\s+vs\.?\s+|\s+@\s+/))
-    .map(s => s.replace(/[^\w\s]/g,'').trim())
-    .filter(s => s.length >= 4);
   return feedItems
     .filter(item => {
-      const text = (item.title||'').toLowerCase();
-      return terms.some(t => text.includes(t)) && (item.pubDate||'');
+      if (!item.pubDate) return false;
+      return feedMatchesEvent(item, ev);
     })
     .map(item => ({
       ts:     item.pubDate||'',
@@ -1764,8 +1808,15 @@ async function refreshSelected() {
       };
       // Push to memory immediately — chart shows NOW without round-trip
       if (snap.floor > 0 && tracked[selKey]) {
-        const freshPt={ts:new Date().toISOString(),floor:snap.floor,avg:snap.avg,
-                       median:snap.median,max:snap.max,count:snap.count};
+        const freshPt={
+          ts:new Date().toISOString(),
+          floor:snap.floor, avg:snap.avg,
+          median:snap.median, max:snap.max, count:snap.count,
+          source_label: d.source_label||'TEvo Live',
+          pages_fetched: d.pages_fetched||0,
+          owned:  d.owned  || {count:0, stats:null},
+          parking:d.parking|| {count:0, stats:null}
+        };
         const ev2=tracked[selKey];
         if(!ev2.history) ev2.history=[];
         const last=ev2.history[ev2.history.length-1];
@@ -2093,13 +2144,9 @@ function updateEventFeedStrip(key) {
   const cutoff=Date.now()-14*86400000;
   let relevant=(eventFeedMap[String(ev.event_id)]||[]).filter(i=>new Date(i.pubDate||0)>cutoff);
   if(!relevant.length&&feedItems.length){
-    const terms=[(ev.performer||''),(ev.name||'')]
-      .flatMap(s=>s.toLowerCase().split(/\s+(?:at|vs\.?|@)\s+/).flatMap(t=>t.split(/\s+/)))
-      .map(t=>t.replace(/[^\w]/g,'').trim()).filter(t=>t.length>=4);
     relevant=feedItems.filter(i=>{
       if(!i.title||new Date(i.pubDate||0)<cutoff) return false;
-      if(i.event_id&&String(i.event_id)===String(ev.event_id)) return true;
-      return terms.some(t=>(i.title+' '+(i.desc||'')).toLowerCase().includes(t));
+      return feedMatchesEvent(i, ev);
     }).sort((a,b)=>new Date(b.pubDate||0)-new Date(a.pubDate||0));
   }
   if(!relevant.length){strip.style.display='none';if(pill)pill.style.display='none';return;}
@@ -2140,14 +2187,10 @@ function renderFeed() {
     else if(lfilt==='event'){
       const ev=selKey?tracked[selKey]:null;
       if(ev){
-        const terms=[(ev.performer||''),(ev.name||'')]
-          .flatMap(s=>s.toLowerCase().split(/\s+(?:at|vs\.?|@)\s+/).flatMap(t=>t.split(/\s+/)))
-          .map(t=>t.replace(/[^\w]/g,'').trim()).filter(t=>t.length>=4);
         const cutoff=Date.now()-14*86400000;
         items=items.filter(i=>{
           if(new Date(i.pubDate||0)<cutoff) return false;
-          if(i.event_id&&String(i.event_id)===String(ev.event_id)) return true;
-          return terms.some(t=>(i.title+' '+(i.desc||'')).toLowerCase().includes(t));
+          return feedMatchesEvent(i, ev);
         });
       }
     }

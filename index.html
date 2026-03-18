@@ -1357,10 +1357,14 @@ async function loadHistory(key) {
         .sort((a,b) => a.ts.localeCompare(b.ts));
       // Only overwrite if GAS returned real data — never wipe good in-memory points
       if (gasRows.length > 0) {
-        // Merge: keep in-memory points not yet in GAS result (written this session)
-        const gasTimes = new Set(gasRows.map(r=>r.ts));
-        const inMemOnly = (ev.history||[]).filter(r=>!gasTimes.has(r.ts) && r.floor>0);
-        ev.history = [...gasRows, ...inMemOnly].sort((a,b)=>a.ts.localeCompare(b.ts));
+        // Sanity filter — same as Firestore path
+        const gasAvg = gasRows.reduce((s,p)=>s+(p.avg||0),0) / gasRows.length;
+        const cleanedGas = gasAvg > 50
+          ? gasRows.filter(p => p.floor >= 20 && p.floor >= gasAvg / 6)
+          : gasRows;
+        const gasTimes = new Set(cleanedGas.map(r=>r.ts));
+        const inMemOnly = (ev.history||[]).filter(r=>!gasTimes.has(r.ts) && r.floor>0 && r.floor>=20);
+        ev.history = [...cleanedGas, ...inMemOnly].sort((a,b)=>a.ts.localeCompare(b.ts));
         loaded = true;
       }
     } catch(e) {

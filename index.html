@@ -2054,21 +2054,32 @@ async function loadFeed(silent=false) {
 async function loadXItems() {
   try {
     const docs=await FS.getFeedItems({limit:300});
-    return docs.map(d=>{
-      const league = d.league||d.feed_league||d.attr_league||'General';
-      return {
-        title:d.post_text||d.title||'',link:d.post_url||d.url||'',
-        desc:d.post_full||d.description||'',pubDate:d.posted_at||d.received_ts||'',
-        author:d.author_name||'',handle:d.author_handle||'',
-        league: league.charAt(0).toUpperCase()+league.slice(1),
-        impact:d.impact||null,matched:d.matched||!!(d.matched_event_id),
-        event_id:d.matched_event_id||'',event_name:d.matched_event_name||'',
-        price_floor:d.price_floor_at_match||0,
-        keywords:d.attr_keywords||[],srcType:'x',
-        affected_event_ids:d.affected_event_ids||[],
-        affected_event_names:d.affected_event_names||[]
-      };
-    });
+    // Filter out internal system items (price alerts, briefs)
+    return docs
+      .filter(d => !['price_alert','refresh_brief','alert','rss_match'].includes(d.source||''))
+      .map(d=>{
+        // fsWriteRssItem schema: league field, post_text, post_url, posted_at
+        const league = d.league||d.feed_league||d.attr_league||'General';
+        return {
+          title:   d.post_text||d.title||'',
+          link:    d.post_url||d.url||'',
+          desc:    d.post_full||d.description||'',
+          pubDate: d.posted_at||d.received_ts||'',
+          author:  d.author_name||'',
+          handle:  d.author_handle||'',
+          league:  league.charAt(0).toUpperCase()+league.slice(1),
+          impact:  d.impact||null,
+          // matched is boolean in fsWriteRssItem
+          matched: d.matched===true||d.matched==='yes'||!!(d.matched_event_id),
+          event_id:   d.matched_event_id||'',
+          event_name: d.matched_event_name||'',
+          price_floor:d.price_floor_at_match||0,
+          keywords:   (d.keywords_hit||d.attr_keywords||'').toString().split(',').filter(Boolean),
+          srcType:'x',
+          affected_event_ids:   d.affected_event_ids||[],
+          affected_event_names: d.affected_event_names||[]
+        };
+      });
   } catch(e) {
     try {
       const d=await gasGet({action:'get_rss_live',limit:300});
@@ -2089,7 +2100,7 @@ async function loadXItems() {
 
 async function loadEspnItems() {
   try {
-    const docs=await FS.query('espn_feed',[{field:'matched',op:'EQUAL',value:true}],[{field:'received_ts',dir:'DESCENDING'}],300);
+    const docs=await FS.query('espn_feed',[],[{field:'received_ts',dir:'DESCENDING'}],300);
     return docs.map(d=>{
       const league=(d.feed_league||'General');
       return {title:d.title||'',link:d.article_url||'',desc:d.description||'',

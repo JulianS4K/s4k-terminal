@@ -400,7 +400,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   <div class="topbar-right">
     <span id="st-bar"></span>
     <span id="clock"></span>
-    <span class="ver-pill" id="ver-badge">Alpha 2.7</span>
+    <span class="ver-pill" id="ver-badge">Alpha 2.8</span>
   </div>
 </div>
 
@@ -671,13 +671,13 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // ================================================================
 
 // ── State ──────────────────────────────────────────────────────
-const CKEY = 's4k_a27';
-const APP_VERSION = 'Alpha 2.7';
+const CKEY = 's4k_a28';
+const APP_VERSION = 'Alpha 2.8';
 
 // Migrate GAS URL from previous versions
 (function migrate() {
   if (localStorage.getItem(CKEY)) return;
-  for (const k of ['s4k_a26','s4k_a25','s4k_a24','s4k_a23']) {
+  for (const k of ['s4k_a27','s4k_a26','s4k_a25','s4k_a24']) {
     const v = localStorage.getItem(k);
     if (v) { localStorage.setItem(CKEY, v); break; }
   }
@@ -1107,6 +1107,38 @@ async function loadTracked() {
 
     renderSidebar();
 
+    // ── Step 4b: Auto-repair events with bad field data ───────────
+    // Events tracked before Alpha 2.6 may have date = "Houston, TX" (location)
+    // or missing venue_id/performer_id. Repair silently in background.
+    Object.entries(tracked).forEach(([key, ev]) => {
+      const needsRepair = !ev.event_id ? false
+        : !ev.occurs_at_local                          // missing local time
+        || (ev.date && !/^\d{4}-\d{2}-\d{2}/.test(ev.date))  // date looks like location
+        || (!ev.venue_id || ev.venue_id.startsWith('v_'))        // fake venue ID
+        || (!ev.performer_id || ev.performer_id.startsWith('p_')); // fake performer ID
+      if (needsRepair) {
+        gasGet({action:'get_event', event_id:String(ev.event_id)}).then(detail => {
+          if (!detail.ok) return;
+          Object.assign(tracked[key], {
+            performer_id:    detail.performer?.id   || ev.performer_id,
+            performer:       detail.performer?.name || ev.performer,
+            venue_id:        detail.venue?.id       || ev.venue_id,
+            venue:           detail.venue?.name     || ev.venue,
+            venue_city:      detail.venue?.location || ev.venue_city,
+            date:            detail.occurs_at       || ev.date,
+            occurs_at_local: detail.occurs_at_local || ev.occurs_at_local,
+            category:        detail.category?.name  || ev.category || '',
+            event_state:     detail.state           || ev.event_state || 'shown',
+            _repaired:       true
+          });
+          // Write repaired data back to GAS so Sheets and Firestore get fixed too
+          gasPost({action:'track', event:{...tracked[key]}}).catch(()=>{});
+          renderSidebar();
+          console.log('[repair] fixed', key, '→ date:', detail.occurs_at_local);
+        }).catch(()=>{});
+      }
+    });
+
     // ── Step 5: All histories in parallel via Firestore ──────────
     loadAllHistories().then(() => {
       renderSidebar(); setSt('Ready');
@@ -1232,9 +1264,11 @@ function renderSidebar() {
     const lat=h[h.length-1], prev=h.length>1?h[h.length-2]:null;
     const fd = prev ? lat.floor-prev.floor : 0;
     // Past/urgency using occurs_at_local (correct timezone)
-    const evTs   = r.occurs_at_local || r.date || '';
-    const isPast = evTs && new Date(evTs) <= new Date();
-    const dOut   = evTs ? Math.max(0,Math.round((new Date(evTs)-new Date())/864e5)) : null;
+    // Use occurs_at_local first; fall back to date only if it looks like an ISO string
+    const rawTs  = r.occurs_at_local || (r.date && /^\d{4}-/.test(r.date) ? r.date : '') || '';
+    const evTs   = rawTs;
+    const isPast = evTs && !isNaN(new Date(evTs)) && new Date(evTs) <= new Date();
+    const dOut   = evTs && !isNaN(new Date(evTs)) ? Math.max(0,Math.round((new Date(evTs)-new Date())/864e5)) : null;
     const urgCol = dOut===null?'var(--muted)':dOut<=1?'var(--red)':dOut<=3?'var(--yellow)':dOut<=7?'var(--orange)':'var(--muted)';
     // News badge
     const news = (eventFeedMap[String(r.event_id)]||[]).filter(i=>Date.now()-new Date(i.pubDate||0)<86400000);
@@ -1265,8 +1299,9 @@ async function selectEvent(key) {
   const ev = tracked[key];
   if (!ev) return;
   document.getElementById('ev-title').textContent = ev.name||'—';
+  const _dateStr = ev.occurs_at_local || (ev.date && /^\d{4}-/.test(ev.date) ? ev.date : '');
   document.getElementById('ev-meta').textContent =
-    [(ev.venue||'').replace(/_/g,' '), safeDate(ev.date)].filter(Boolean).join(' · ');
+    [(ev.venue||'').replace(/_/g,' '), _dateStr ? safeDate(_dateStr) : ''].filter(Boolean).join(' · ');
   document.getElementById('btn-ref').disabled = false;
   document.getElementById('btn-rem').disabled = false;
 
@@ -1292,8 +1327,11 @@ function renderDetail(key) {
   const prev = h.length>1 ? h[h.length-2] : null;
 
   document.getElementById('ev-title').textContent = r.name||'—';
+  // Guard: use occurs_at_local first (correct timezone), fall back to date only
+  // if it looks like an actual ISO date string (not a location like "Houston, TX")
+  const dateForDisplay = r.occurs_at_local || (r.date && /^\d{4}-/.test(r.date) ? r.date : '');
   document.getElementById('ev-meta').textContent =
-    [(r.venue||'').replace(/_/g,' '), safeDate(r.date)].filter(Boolean).join(' · ');
+    [(r.venue||'').replace(/_/g,' '), dateForDisplay ? safeDate(dateForDisplay) : ''].filter(Boolean).join(' · ');
 
   // Diagnostic: snapshots loaded but all have floor=$0 (old broken Firestore docs)
   if (allSnaps.length > 0 && h.length === 0) {

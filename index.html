@@ -386,7 +386,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   <div class="topbar-right">
     <span id="st-bar"></span>
     <span id="clock"></span>
-    <span class="ver-pill" id="ver-badge">Alpha 2.3</span>
+    <span class="ver-pill" id="ver-badge">Alpha 2.4</span>
   </div>
 </div>
 
@@ -398,7 +398,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   <div class="tab" onclick="showPanel('search',this)" id="tab-search">
     <span class="fk">F2</span>Search
   </div>
-  <div class="tab" onclick="showPanel('feed',this);loadFeed();" id="tab-feed">
+  <div class="tab" onclick="showPanel('feed',this);if(feedItems.length){renderFeed();}else{loadFeed();}" id="tab-feed">
     <span class="fk">F3</span>Feed
     <span class="tab-badge" id="feed-badge" style="display:none;">0</span>
   </div>
@@ -615,13 +615,13 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // ================================================================
 
 // ── State ──────────────────────────────────────────────────────
-const CKEY = 's4k_a23';
-const APP_VERSION = 'Alpha 2.3';
+const CKEY = 's4k_a24';
+const APP_VERSION = 'Alpha 2.4';
 
 // Migrate GAS URL from previous versions
 (function migrate() {
   if (localStorage.getItem(CKEY)) return;
-  for (const k of ['s4k_a22','s4k_a21','s4k_a20','s4k_v526']) {
+  for (const k of ['s4k_a23','s4k_a22','s4k_a21','s4k_a20']) {
     const v = localStorage.getItem(k);
     if (v) { localStorage.setItem(CKEY, v); break; }
   }
@@ -1601,24 +1601,33 @@ async function trackEvent(eid,name,venue,perf,date) {
 }
 
 // ── Feed ────────────────────────────────────────────────────────
-async function loadFeed() {
+async function loadFeed(silent=false) {
   const btn=document.getElementById('btn-feed-ref');
-  btn.disabled=true; btn.textContent='Loading…'; setSt('Loading feed…');
+  if(!silent){ btn.disabled=true; btn.textContent='Loading…'; setSt('Loading feed…'); }
   try {
     const [xRes,espnRes]=await Promise.allSettled([loadXItems(),loadEspnItems()]);
     xFeedItems=xRes.status==='fulfilled'?xRes.value:xFeedItems;
     espnFeedItems=espnRes.status==='fulfilled'?espnRes.value:espnFeedItems;
     feedItems=mergeAndMap(xFeedItems,espnFeedItems);
     const matched=feedItems.filter(i=>i.matched||i.event_id).length;
+    // Always update badge — even on silent background load
     const badge=document.getElementById('feed-badge');
-    if(badge){badge.textContent=feedItems.length;badge.style.display=feedItems.length?'':'none';}
+    if(badge && feedItems.length){
+      badge.textContent=feedItems.length;
+      badge.style.display='inline-flex';
+    }
     const counts=document.getElementById('feed-counts');
     if(counts) counts.textContent=`𝕏 ${xFeedItems.length} · ESPN ${espnFeedItems.length}${matched?' · '+matched+' matched':''}`;
-    renderFeed();
+    // Only re-render the feed list if we're on the feed panel (avoid layout work offscreen)
+    const feedPanel=document.getElementById('panel-feed');
+    if(feedPanel && feedPanel.classList.contains('active')) renderFeed();
+    // Always update event strip — it shows in F1 portfolio
     if(selKey) updateEventFeedStrip(selKey);
-    setSt('Ready');
-  } catch(e){toast('Feed failed: '+e.message,'err');setSt('Ready');}
-  btn.disabled=false; btn.textContent='Refresh';
+    if(!silent) setSt('Ready');
+  } catch(e){
+    if(!silent){ toast('Feed failed: '+e.message,'err'); setSt('Ready'); }
+  }
+  if(!silent){ btn.disabled=false; btn.textContent='Refresh'; }
 }
 
 async function loadXItems() {
@@ -1909,8 +1918,13 @@ async function init() {
   Promise.allSettled([gasGet({action:'ping'}).catch(()=>{}), FS.getToken().catch(()=>{})]);
 
   await loadTracked();
-  // Start feed load in background
-  loadFeed().catch(()=>{});
+
+  // Load feed silently in background — doesn't touch status bar or buttons
+  // Populates badge + event strip as soon as data arrives
+  loadFeed(true).catch(()=>{});
+
+  // Auto-refresh feed every 15 minutes (matches GAS espnPollTrigger cadence)
+  setInterval(() => loadFeed(true).catch(()=>{}), 15 * 60 * 1000);
 }
 
 window.addEventListener('load', init);

@@ -155,11 +155,16 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 .metric-src{font-size:9px;font-weight:600;padding:1px 6px;border-radius:999px;margin-left:6px;vertical-align:middle;}
 .metric-src.tevo-live{background:var(--green-dim);color:var(--green);}
 .metric-src.tevo-stats{background:var(--yellow-dim);color:var(--yellow);}
-.owned-strip{border-top:1px solid var(--border);flex-shrink:0;background:rgba(66,133,244,0.04);}
-.owned-strip .metrics{background:transparent;}
-.owned-strip .metric-val{font-size:18px;color:var(--blue);}
-.owned-strip .v-f{color:var(--blue);}
-.owned-lbl{font-size:9px;font-weight:600;padding:6px 16px 0;color:var(--blue);opacity:0.8;letter-spacing:0.08em;text-transform:uppercase;}
+.metrics-table{flex-shrink:0;border-bottom:1px solid var(--border);}
+.metrics-row{display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid var(--border);}
+.metrics-row:last-child{border-bottom:none;}
+.row-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
+  padding:5px 14px 0;display:flex;align-items:center;gap:6px;color:var(--muted);grid-column:1/-1;}
+.row-lbl.market-lbl{color:var(--green);opacity:.85;}
+.row-lbl.owned-lbl-r{color:var(--blue);opacity:.85;}
+.metrics-row .metric{font-size:11px;border-right:1px solid var(--border);}
+.metrics-row .metric:last-child{border-right:none;}
+.metric-val.owned{font-size:20px;color:var(--blue);}
 .owned-none{padding:8px 16px;font-size:11px;color:var(--muted);font-style:italic;}
 .parking-tog{display:flex;align-items:center;gap:8px;padding:5px 16px;border-top:1px solid var(--border);flex-shrink:0;background:var(--bg2);}
 .margin-badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:999px;margin-left:auto;}
@@ -400,7 +405,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   <div class="topbar-right">
     <span id="st-bar"></span>
     <span id="clock"></span>
-    <span class="ver-pill" id="ver-badge">Alpha 2.9</span>
+    <span class="ver-pill" id="ver-badge">Alpha 3.0</span>
   </div>
 </div>
 
@@ -454,62 +459,77 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
           <button class="btn btn-sm danger" id="btn-rem" onclick="removeSelected()" disabled>Remove</button>
         </div>
       </div>
-      <!-- Market metric strip (TEvo, non-parking, non-owned) -->
-      <div class="metrics" id="market-strip">
-        <div class="metric">
-          <div class="metric-lbl">Floor <span class="metric-src tevo-live" id="src-tag">TEvo</span></div>
-          <div class="metric-val v-f" id="m-f">—</div>
-          <div class="metric-delta" id="m-fd"></div>
+      <!-- Unified metrics table: market row + owned row (same columns) -->
+      <div class="metrics-table" id="metrics-table">
+        <!-- Row label: Market -->
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid rgba(255,255,255,0.04);">
+          <div style="grid-column:1/-1;" class="row-lbl market-lbl">
+            Market <span class="metric-src tevo-live" id="src-tag">TEvo</span>
+          </div>
         </div>
-        <div class="metric">
-          <div class="metric-lbl">Average</div>
-          <div class="metric-val v-a" id="m-a">—</div>
-          <div class="metric-delta" id="m-ad"></div>
-        </div>
-        <div class="metric">
-          <div class="metric-lbl">Median</div>
-          <div class="metric-val v-m" id="m-m">—</div>
-          <div class="metric-delta" id="m-md"></div>
-        </div>
-        <div class="metric">
-          <div class="metric-lbl">Max</div>
-          <div class="metric-val v-x" id="m-x">—</div>
-          <div class="metric-delta" id="m-xd"></div>
-        </div>
-        <div class="metric">
-          <div class="metric-lbl">Listings</div>
-          <div class="metric-val v-c" id="m-c">—</div>
-          <div class="metric-delta" id="m-cd"></div>
-        </div>
-      </div>
-      <!-- S4K owned position strip (hidden when no position) -->
-      <div class="owned-strip" id="owned-strip" style="display:none;">
-        <div class="owned-lbl">S4K Position <span id="owned-src-tag" style="color:var(--muted);font-weight:400;">(TEvo)</span></div>
-        <div class="metrics">
+        <!-- Market metrics row -->
+        <div class="metrics-row" id="market-strip">
           <div class="metric">
-            <div class="metric-lbl">S4K Floor</div>
-            <div class="metric-val v-f" id="o-f">—</div>
-            <div class="metric-delta" id="o-fd"></div>
+            <div class="metric-lbl">Floor</div>
+            <div class="metric-val v-f" id="m-f">—</div>
+            <div class="metric-delta" id="m-fd"></div>
           </div>
           <div class="metric">
-            <div class="metric-lbl">S4K Avg</div>
-            <div class="metric-val v-a" id="o-a">—</div>
-            <div class="metric-delta"></div>
+            <div class="metric-lbl">Average</div>
+            <div class="metric-val v-a" id="m-a">—</div>
+            <div class="metric-delta" id="m-ad"></div>
           </div>
           <div class="metric">
-            <div class="metric-lbl">Wholesale</div>
-            <div class="metric-val" style="color:var(--muted);font-size:18px;" id="o-w">—</div>
-            <div class="metric-delta" style="font-size:10px;color:var(--muted);">avg cost/ticket</div>
+            <div class="metric-lbl">Median</div>
+            <div class="metric-val v-m" id="m-m">—</div>
+            <div class="metric-delta" id="m-md"></div>
           </div>
           <div class="metric">
-            <div class="metric-lbl">Tickets</div>
-            <div class="metric-val v-c" id="o-qty">—</div>
-            <div class="metric-delta" id="o-groups"></div>
+            <div class="metric-lbl">Max</div>
+            <div class="metric-val v-x" id="m-x">—</div>
+            <div class="metric-delta" id="m-xd"></div>
           </div>
           <div class="metric">
-            <div class="metric-lbl">vs Market</div>
-            <div class="metric-val" id="o-margin" style="font-size:18px;">—</div>
-            <div class="metric-delta" style="font-size:10px;color:var(--muted);">floor delta</div>
+            <div class="metric-lbl">Listings</div>
+            <div class="metric-val v-c" id="m-c">—</div>
+            <div class="metric-delta" id="m-cd"></div>
+          </div>
+        </div>
+        <!-- Owned row — hidden until S4K has position on this event -->
+        <div id="owned-strip" style="display:none;">
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid rgba(255,255,255,0.04);">
+            <div style="grid-column:1/-1;" class="row-lbl owned-lbl-r">
+              Owned
+              <span style="font-size:9px;font-weight:400;color:var(--muted);">(TEvo)</span>
+              <span id="o-groups" style="font-size:9px;font-weight:400;color:var(--muted);margin-left:4px;"></span>
+            </div>
+          </div>
+          <div class="metrics-row">
+            <div class="metric">
+              <div class="metric-lbl">Floor</div>
+              <div class="metric-val owned" id="o-f">—</div>
+              <div class="metric-delta" id="o-fd"></div>
+            </div>
+            <div class="metric">
+              <div class="metric-lbl">Average</div>
+              <div class="metric-val owned" id="o-a">—</div>
+              <div class="metric-delta"></div>
+            </div>
+            <div class="metric">
+              <div class="metric-lbl">Median</div>
+              <div class="metric-val owned" id="o-m">—</div>
+              <div class="metric-delta"></div>
+            </div>
+            <div class="metric">
+              <div class="metric-lbl">Max</div>
+              <div class="metric-val owned" id="o-x">—</div>
+              <div class="metric-delta"></div>
+            </div>
+            <div class="metric">
+              <div class="metric-lbl">Listings</div>
+              <div class="metric-val owned" id="o-qty">—</div>
+              <div class="metric-delta" id="o-margin" style="font-size:10px;"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -694,13 +714,13 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // ================================================================
 
 // ── State ──────────────────────────────────────────────────────
-const CKEY = 's4k_a29';
-const APP_VERSION = 'Alpha 2.9';
+const CKEY = 's4k_a30';
+const APP_VERSION = 'Alpha 3.0';
 
 // Migrate GAS URL from previous versions
 (function migrate() {
   if (localStorage.getItem(CKEY)) return;
-  for (const k of ['s4k_a28','s4k_a27','s4k_a26','s4k_a25']) {
+  for (const k of ['s4k_a29','s4k_a28','s4k_a27','s4k_a26']) {
     const v = localStorage.getItem(k);
     if (v) { localStorage.setItem(CKEY, v); break; }
   }
@@ -1387,6 +1407,66 @@ function renderDetail(key) {
     if(sl) {
       const ts=lat.ts; const m=Math.round((Date.now()-new Date(ts))/60000);
       sl.textContent='Updated: '+(m<2?'just now':m<60?m+'m ago':Math.round(m/60)+'h ago');
+    }
+
+    // ── Source tag ────────────────────────────────────────────────
+    const srcTag = document.getElementById('src-tag');
+    if (srcTag) {
+      const isStats = (lat.source_label||'').includes('Stats');
+      srcTag.textContent = lat.source_label || 'TEvo';
+      srcTag.className = 'metric-src ' + (isStats ? 'tevo-stats' : 'tevo-live');
+    }
+
+    // ── Owned row — same 5 columns as market ─────────────────────
+    const ownedStrip = document.getElementById('owned-strip');
+    const owned = lat.owned;
+    if (owned && owned.count > 0 && owned.stats) {
+      if (ownedStrip) ownedStrip.style.display = '';
+      const os = owned.stats;
+      const oFloor  = os.retail?.floor  || 0;
+      const oAvg    = os.retail?.avg    || 0;
+      const oMedian = os.retail?.median || 0;
+      const oMax    = os.retail?.max    || 0;
+      const oGrps   = os.groups || owned.count || 0;
+      const oQty    = os.qty || 0;
+      const margin  = os.vs_market_floor;
+
+      const setEl = (id,val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
+      setEl('o-f',   oFloor>0  ? fmt(oFloor)  : '—');
+      setEl('o-a',   oAvg>0    ? fmt(oAvg)    : '—');
+      setEl('o-m',   oMedian>0 ? fmt(oMedian) : '—');
+      setEl('o-x',   oMax>0    ? fmt(oMax)    : '—');
+      setEl('o-qty', oGrps>0   ? fmtC(oGrps)  : '—');
+
+      const grpEl = document.getElementById('o-groups');
+      if (grpEl) grpEl.textContent = oQty > 0 ? `· ${fmtC(oQty)} tickets` : '';
+
+      // vs-market delta below listings count
+      const mEl = document.getElementById('o-margin');
+      const oFd = document.getElementById('o-fd');
+      if (margin !== null && margin !== undefined) {
+        const col = margin > 0 ? 'var(--green)' : margin < 0 ? 'var(--red)' : 'var(--muted)';
+        if (mEl) {
+          mEl.style.color = col;
+          mEl.textContent = (margin>0?'▲ +':'▼ ')+'$'+Math.abs(margin)+' vs mkt';
+        }
+        if (oFd) oFd.innerHTML = `<span style="color:${col};font-size:10px;">${margin>0?'above':'below'} market</span>`;
+      }
+    } else {
+      if (ownedStrip) ownedStrip.style.display = 'none';
+    }
+
+    // ── Parking toggle visibility ─────────────────────────────────
+    const parkingTog = document.getElementById('parking-tog');
+    const parking = lat.parking;
+    if (parking && parking.count > 0) {
+      if (parkingTog) parkingTog.style.display = 'flex';
+      const pc = document.getElementById('parking-count');
+      const pf = document.getElementById('parking-floor');
+      if (pc) pc.textContent = fmtC(parking.count);
+      if (pf && parking.stats?.floor) pf.textContent = `Floor ${fmt(parking.stats.floor)}`;
+    } else {
+      if (parkingTog) parkingTog.style.display = 'none';
     }
   }
 }

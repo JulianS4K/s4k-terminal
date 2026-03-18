@@ -2384,6 +2384,8 @@ async function listenToTevo(token,pid) {
           };
           if(np.floor<=0||isNaN(np.floor)) continue;
           if((ev.history||[]).some(h=>h.ts===np.ts)) continue;
+          // Sanity: floor < avg/8 means parking leaked through (e.g. $16/$407)
+          if(np.avg > 50 && np.floor < np.avg / 8) continue;
           if(!ev.history) ev.history=[];
           ev.history.push(np);
           ev.history.sort((a,b)=>a.ts.localeCompare(b.ts));

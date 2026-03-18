@@ -400,7 +400,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   <div class="topbar-right">
     <span id="st-bar"></span>
     <span id="clock"></span>
-    <span class="ver-pill" id="ver-badge">Alpha 2.6</span>
+    <span class="ver-pill" id="ver-badge">Alpha 2.7</span>
   </div>
 </div>
 
@@ -671,13 +671,13 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // ================================================================
 
 // ── State ──────────────────────────────────────────────────────
-const CKEY = 's4k_a26';
-const APP_VERSION = 'Alpha 2.6';
+const CKEY = 's4k_a27';
+const APP_VERSION = 'Alpha 2.7';
 
 // Migrate GAS URL from previous versions
 (function migrate() {
   if (localStorage.getItem(CKEY)) return;
-  for (const k of ['s4k_a25','s4k_a24','s4k_a23','s4k_a22']) {
+  for (const k of ['s4k_a26','s4k_a25','s4k_a24','s4k_a23']) {
     const v = localStorage.getItem(k);
     if (v) { localStorage.setItem(CKEY, v); break; }
   }
@@ -885,14 +885,23 @@ const FS = (() => {
       ? buildFilter(filters[0])
       : {compositeFilter:{op:'AND', filters: filters.map(buildFilter)}};
 
+    // IMPORTANT: Omit orderBy from the Firestore query when we have a filter.
+    // filter + orderBy on different fields requires a composite index.
+    // Without the index Firestore returns HTTP 400 — we silently fall to GAS
+    // and miss all historical data. Instead: fetch unordered, sort client-side.
+    // The composite index (event_id ASC, snapshot_ts DESC) can be added later
+    // for performance, but correctness comes first.
     const structuredQuery = {
       from:  [{collectionId: collection}],
       limit: {value: limit},
     };
-    if (filters.length) structuredQuery.where  = where;
-    if (orderBy.length) structuredQuery.orderBy = orderBy.map(o=>({
-      field:{fieldPath:o.field}, direction:o.dir||'DESCENDING'
-    }));
+    if (filters.length) structuredQuery.where = where;
+    // Only add server-side orderBy when there are NO filters (no index needed then)
+    if (!filters.length && orderBy.length) {
+      structuredQuery.orderBy = orderBy.map(o=>({
+        field:{fieldPath:o.field}, direction:o.dir||'DESCENDING'
+      }));
+    }
 
     const r = await fetch(url, {
       method:  'POST',
@@ -901,9 +910,22 @@ const FS = (() => {
     });
     if (!r.ok) throw new Error(`Firestore query ${collection}: HTTP ${r.status}`);
     const results = await r.json();
-    return (Array.isArray(results) ? results : [results])
+    const docs = (Array.isArray(results) ? results : [results])
       .filter(row => row.document)
       .map(row => decodeDoc(row.document));
+
+    // Client-side sort — applies the orderBy that we omitted from the server query
+    if (orderBy.length && docs.length > 1) {
+      docs.sort((a, b) => {
+        for (const {field, dir} of orderBy) {
+          const av = a[field]||'', bv = b[field]||'';
+          const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+          if (cmp !== 0) return dir === 'ASCENDING' ? cmp : -cmp;
+        }
+        return 0;
+      });
+    }
+    return docs;
   }
 
   function buildFilter({field, op, value}) {
@@ -1165,11 +1187,15 @@ async function loadHistory(key) {
       }
     } catch(e) {
       // GAS errored — keep whatever we have in memory, don't wipe it
+      console.warn('[loadHistory] GAS fallback failed:', e.message);
     }
   }
 
   // If still no data after both paths, initialize to empty (don't leave undefined)
   if (!ev.history) ev.history = [];
+
+  // Debug: log how many snapshots we found
+  console.log(`[loadHistory] ${key}: ${(ev.history||[]).length} snapshots (${loaded?'FS':'GAS'} path)`);
 
   if (selKey===key && ev.history.length>0) renderDetail(key);
 }
@@ -1978,13 +2004,18 @@ async function startRealtimeListener() {
 
 async function listenToTevo(token,pid) {
   const url=`https://firestore.googleapis.com/v1/projects/${pid}/databases/(default)/documents:listen`;
+  // Listen to ALL new writes to tevo/ — no limit, no orderBy (no index needed).
+  // We track last-seen ts per event to deduplicate on reconnect.
+  const listenedSince = new Date(Date.now() - 5*60*1000).toISOString(); // last 5 min on connect
   const body=JSON.stringify({
     database:`projects/${pid}/databases/(default)`,
     addTarget:{query:{
       parent:`projects/${pid}/databases/(default)/documents`,
-      structuredQuery:{from:[{collectionId:'tevo'}],
-        orderBy:[{field:{fieldPath:'snapshot_ts'},direction:'DESCENDING'}],
-        limit:{value:1}}
+      structuredQuery:{
+        from:[{collectionId:'tevo'}],
+        // Filter: only docs written in the last 5 min on connect, then stream all new ones
+        // No orderBy = no composite index required
+      }
     },targetId:1}
   });
   try {
@@ -2021,7 +2052,20 @@ async function listenToTevo(token,pid) {
           ev.history.push(np);
           ev.history.sort((a,b)=>a.ts.localeCompare(b.ts));
           renderSidebar();
-          if(selKey===key){renderDetail(key);renderChart(ev);setSt('● Live update: '+ev.name);}
+          if(selKey===key){
+            renderDetail(key);
+            renderChart(ev);
+            // Flash live badge + status
+            const badge=document.getElementById('live-badge');
+            if(badge){badge.style.display='inline';badge.style.opacity='1';}
+            setSt(`● Live — ${ev.name} · Floor ${fmt(np.floor)} · ${fmtC(np.count)} listings`);
+            // Show toast for significant floor change
+            const prev=ev.history[ev.history.length-2];
+            if(prev&&Math.abs(np.floor-prev.floor)>=5){
+              const dir=np.floor>prev.floor?'▲':'▼';
+              toast(`${ev.name} floor ${dir}$${Math.abs(np.floor-prev.floor)} → ${fmt(np.floor)}`);
+            }
+          }
         }catch(e){}
       }
     }

@@ -417,7 +417,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   <div class="tab" onclick="showPanel('search',this)" id="tab-search">
     <span class="fk">F2</span>Search
   </div>
-  <div class="tab" onclick="showPanel('feed',this);if(feedItems.length){renderFeed();}else{loadFeed();}" id="tab-feed">
+  <div class="tab" onclick="showPanel('feed',this);setLF('matched',document.getElementById('pill-matched'));" id="tab-feed">
     <span class="fk">F3</span>Feed
     <span class="tab-badge" id="feed-badge" style="display:none;">0</span>
   </div>
@@ -631,16 +631,17 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
       </div>
       <!-- League pills -->
       <div class="feed-bar">
-        <div class="f-pill active" onclick="setLF('all',this)">All</div>
+        <div class="f-pill active" id="pill-matched" onclick="setLF('matched',this)" style="border-color:rgba(52,168,83,0.5);color:var(--green);">Matched ★</div>
+        <div class="f-pill" onclick="setLF('all',this)">All</div>
         <div class="f-pill" onclick="setLF('NBA',this)">NBA</div>
         <div class="f-pill" onclick="setLF('NFL',this)">NFL</div>
         <div class="f-pill" onclick="setLF('NHL',this)">NHL</div>
         <div class="f-pill" onclick="setLF('MLB',this)">MLB</div>
         <div class="f-pill" onclick="setLF('NCAA',this)">NCAA</div>
         <div class="f-pill" onclick="setLF('Soccer',this)">Soccer</div>
-        <div class="f-pill" onclick="setLF('MMA',this)">MMA</div>
+
         <div class="f-pill" onclick="setLF('Concert',this)">Concert</div>
-        <div class="f-pill" onclick="setLF('matched',this)" style="color:var(--orange);border-color:rgba(255,109,0,0.4);">Matched ●</div>
+
         <div class="f-pill event-pill" id="f-event-pill" onclick="setLF('event',this)" style="display:none;">Event ★</div>
         <input class="feed-search" id="feed-kw" placeholder="keyword, @handle…" oninput="renderFeed()">
         <div class="feed-src-pills">
@@ -731,7 +732,7 @@ let chart = null, cmode = 'price';
 let son = {floor:true, med:false, avg:false, max:false};
 let xFeedItems = [], espnFeedItems = [], feedItems = [];
 let eventFeedMap = {};
-let lfilt = 'all', sfilt = null;
+let lfilt = 'matched', sfilt = null;
 let _nextUpdateMap = {};
 let snapshotPollTimer = null, lastSnapshotTs = null;
 let _realtimeController = null, _realtimeActive = false;
@@ -2201,7 +2202,13 @@ function renderFeed() {
   if(sfilt==='x') items=items.filter(i=>i.srcType==='x');
   if(sfilt==='espn') items=items.filter(i=>i.srcType==='espn');
   if(lfilt&&lfilt!=='all'){
-    if(lfilt==='matched') items=items.filter(i=>i.matched||i.event_id);
+    if(lfilt==='matched') {
+      const trackedIds = new Set(Object.values(tracked).map(ev=>String(ev.event_id)));
+      const portfolioItems = items.filter(i => i.event_id && trackedIds.has(String(i.event_id)));
+      items = portfolioItems.length
+        ? portfolioItems
+        : items.filter(i => i.matched===true || i.matched==='yes' || !!(i.event_id));
+    }
     else if(lfilt==='event'){
       const ev=selKey?tracked[selKey]:null;
       if(ev){
@@ -2219,6 +2226,14 @@ function renderFeed() {
 
   const el=document.getElementById('feed-list');
   if(!items.length){
+    if(lfilt==='matched'){
+      el.innerHTML=`<div style="padding:40px 16px;text-align:center;color:var(--muted);">
+        <div style="font-size:28px;margin-bottom:10px;">📭</div>
+        <div style="font-size:13px;color:var(--text2);">No matched news yet</div>
+        <div style="font-size:11px;margin-top:6px;line-height:1.5;">ESPN articles mentioning your tracked teams appear here automatically</div>
+      </div>`;
+      return;
+    }
     el.innerHTML='<div class="empty-state"><div class="icon">📰</div><div class="msg">No items match</div></div>';
     return;
   }

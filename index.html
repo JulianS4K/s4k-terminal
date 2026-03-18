@@ -411,7 +411,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   <div class="topbar-right">
     <span id="st-bar"></span>
     <span id="clock"></span>
-    <span class="ver-pill" id="ver-badge">Alpha 3.1</span>
+    <span class="ver-pill" id="ver-badge">Alpha 3.2</span>
   </div>
 </div>
 
@@ -461,7 +461,10 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
         </div>
         <div class="panel-actions">
           <span id="lst-pill" style="display:none;font-size:11px;padding:3px 10px;border-radius:999px;background:var(--green-dim);color:var(--green);font-weight:600;"></span>
-          <button class="btn btn-sm" id="btn-ref" onclick="refreshSelected()" disabled>Refresh</button>
+          <div id="next-update-wrap" style="display:none;font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px;">
+            <span style="opacity:0.5;">Next update</span>
+            <span id="next-update-timer" style="font-family:var(--mono);font-weight:600;color:var(--teal);">—</span>
+          </div>
           <button class="btn btn-sm danger" id="btn-rem" onclick="removeSelected()" disabled>Remove</button>
         </div>
       </div>
@@ -730,8 +733,11 @@ const CKEY = 's4k_a30';
 //            4-tier cadence, auto-update dual-layer, Matched ★ tab
 // Alpha 3.1  Composite index query, orderBy server-side, limit 500,
 //            poll last_updated fallback, SSE parking sanity filter
+// Alpha 3.2  Remove manual refresh → auto-update timer, SSE filter,
+//            chart debounce, token cache, session error state,
+//            sanity filter tightened, blank feed card fix, ET timezone
 // ================================================================
-const APP_VERSION = 'Alpha 3.1';
+const APP_VERSION = 'Alpha 3.2';
 
 // Migrate GAS URL from previous versions
 (function migrate() {
@@ -750,6 +756,45 @@ let eventFeedMap = {};
 let lfilt = 'matched', sfilt = null;
 let _nextUpdateMap = {};
 let snapshotPollTimer = null, lastSnapshotTs = null;
+let _updateTimerInterval = null;
+
+// ── Next-update countdown timer ────────────────────────────────
+// Shows "Next update in 8m 32s" below the event header.
+// Reads last_snapshot_ts from event_index + cadence window to compute ETA.
+// Ticks every 5s. Cadence mirrors REFRESH_CADENCE in Config.gs:
+//   < 1 day → 15 min · 1-2 days → 30 min · 2-7 days → 60 min · 7+ days → 1440 min
+function startUpdateTimer(eventId) {
+  if (_updateTimerInterval) clearInterval(_updateTimerInterval);
+  const wrap = document.getElementById('next-update-wrap');
+  const el   = document.getElementById('next-update-timer');
+  if (!wrap || !el) return;
+  wrap.style.display = 'flex';
+
+  async function tick() {
+    try {
+      const idx = await FS.getEventIndex(eventId);
+      if (!idx) { el.textContent = '—'; return; }
+      const lastTs    = idx.last_snapshot_ts || idx.last_updated || '';
+      if (!lastTs) { el.textContent = '—'; return; }
+      const evDate    = idx.event_date || '';
+      const daysOut   = evDate
+        ? Math.max(0, (new Date(evDate) - Date.now()) / 864e5) : 999;
+      const winMins   = daysOut < 1 ? 15 : daysOut <= 2 ? 30 : daysOut <= 7 ? 60 : 1440;
+      const nextMs    = new Date(lastTs).getTime() + winMins * 60 * 1000;
+      const secsLeft  = Math.max(0, Math.round((nextMs - Date.now()) / 1000));
+      if (secsLeft === 0) {
+        el.textContent = 'any moment';
+        el.style.color = 'var(--green)';
+      } else {
+        const m = Math.floor(secsLeft / 60), s = secsLeft % 60;
+        el.textContent = m > 0 ? `${m}m ${s}s` : `${s}s`;
+        el.style.color = secsLeft < 120 ? 'var(--yellow)' : 'var(--teal)';
+      }
+    } catch(e) { el.textContent = '—'; }
+  }
+  tick();
+  _updateTimerInterval = setInterval(tick, 5000);
+}
 let _realtimeController = null, _realtimeActive = false;
 
 // ── Utilities ──────────────────────────────────────────────────
@@ -1145,6 +1190,7 @@ async function loadTracked() {
       }
     } catch(fsErr) {
       // Firestore unavailable — fall through to GAS
+      setSt('Firestore unavailable — using GAS fallback…');
     }
 
     // ── Step 3: GAS fallback (cold start risk, ~4.8s) ────────────
@@ -1287,7 +1333,7 @@ async function loadHistory(key) {
         // Sanity filter: remove data points where floor << avg (parking leak)
         const validAvg = mapped.reduce((s,p)=>s+(p.avg||0),0) / mapped.length;
         const cleaned  = validAvg > 50
-          ? mapped.filter(p => p.floor >= validAvg / 8)
+          ? mapped.filter(p => p.floor >= 20 && p.floor >= validAvg / 6)
           : mapped;
         if (cleaned.length > 0) { ev.history = cleaned; loaded = true; }
       }
@@ -1555,7 +1601,14 @@ function switchMode(mode,el) {
   if(selKey) renderChart(tracked[selKey]);
 }
 
+let _chartDebounceTimer = null;
 function renderChart(r) {
+  // Debounce: SSE may fire many documentChange events in rapid succession.
+  // Collapse multiple calls within 50ms into a single chart rebuild.
+  if (_chartDebounceTimer) clearTimeout(_chartDebounceTimer);
+  _chartDebounceTimer = setTimeout(() => _renderChartNow(r), 50);
+}
+function _renderChartNow(r) {
   const canvas=document.getElementById('main-ch');
   const empty=document.getElementById('empty-ch');
   if(!r) { canvas.style.display='none'; empty.style.display='flex'; return; }
@@ -1569,10 +1622,11 @@ function renderChart(r) {
   }
   canvas.style.display='block'; empty.style.display='none';
   const singlePoint = h.length===1;
+  const ET_OFFSET_MS = 5 * 3600 * 1000; // ET = UTC-5 (close enough, not DST-aware)
   const labels=h.map(s=>{
-    const d=new Date(s.ts);
-    return (d.getMonth()+1)+'/'+d.getDate()+' '+
-      d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');
+    const d=new Date(new Date(s.ts).getTime() - ET_OFFSET_MS);
+    return (d.getUTCMonth()+1)+'/'+d.getUTCDate()+' '+
+      d.getUTCHours().toString().padStart(2,'0')+':'+d.getUTCMinutes().toString().padStart(2,'0')+'ET';
   });
   if(chart){chart.destroy();chart=null;}
 
@@ -1648,7 +1702,7 @@ function renderChart(r) {
       backgroundColor:'rgba(52,168,83,0.15)',borderColor:'#34A853',borderWidth:1.5,borderRadius:4
     }]},options:base});
   }
-}
+} // end _renderChartNow
 
 // ── Feed markers ────────────────────────────────────────────────
 // ── Client-side league-gated team matching ───────────────────────
@@ -1804,84 +1858,7 @@ async function loadEventFeedMarkers(key) {
 }
 
 // ── Portfolio actions ───────────────────────────────────────────
-async function refreshSelected() {
-  if (!selKey) return;
-  const r = tracked[selKey]; if (!r) return;
-  const btn = document.getElementById('btn-ref');
-  btn.disabled=true; btn.textContent='Refreshing…';
-  setSt(`Refreshing ${r.name}…`);
-  try {
-    const d = await gasGet({
-      action:'fetch_te', event_id:r.event_id, manual:'true',
-      name:encodeURIComponent(r.name||''),
-      venue:encodeURIComponent(r.venue||''),
-      performer:encodeURIComponent(r.performer||''),
-      date:r.date||''
-    });
-    // Cooldown gate — server rejected the request
-    if (d.cooldown) {
-      toast(`Too soon — next refresh in ${d.remaining_label}`, 'warn');
-      setSt(`Refresh blocked · next in ${d.remaining_label}`);
-      btn.disabled=false; btn.textContent='Refresh';
-      // Show countdown on button until cooldown clears
-      let secsLeft = d.remaining_secs;
-      const countdown = setInterval(() => {
-        secsLeft--;
-        if (secsLeft <= 0) {
-          clearInterval(countdown);
-          btn.textContent='Refresh';
-          btn.disabled=false;
-          setSt('Ready');
-        } else {
-          const m=Math.floor(secsLeft/60), s=secsLeft%60;
-          btn.textContent=`${m>0?m+'m ':''}${s}s`;
-          btn.disabled=true;
-        }
-      }, 1000);
-      return;
-    }
-
-    if(d.ok && d.stats) {
-      const s=d.stats;
-      const snap={
-        source:'TE', event_id:r.event_id, event_name:r.name, venue:r.venue, performer:r.performer,
-        sport_type:'', event_date:r.date, days_until_event:String(Math.max(0,daysUntil(r.date)||0)),
-        floor:Math.round(s.floor||0), avg:Math.round(s.avg||0),
-        median:Math.round(s.median||0), max:Math.round(s.max||0), count:Math.round(s.count||0),
-        floor_delta:0, avg_delta:0, median_delta:0, count_delta:0,
-        days_until_delta:0, price_buckets:{}, data_source:'listings'
-      };
-      // Push to memory immediately — chart shows NOW without round-trip
-      if (snap.floor > 0 && tracked[selKey]) {
-        const freshPt={
-          ts:new Date().toISOString(),
-          floor:snap.floor, avg:snap.avg,
-          median:snap.median, max:snap.max, count:snap.count,
-          source_label: d.source_label||'TEvo Live',
-          pages_fetched: d.pages_fetched||0,
-          owned:  d.owned  || {count:0, stats:null},
-          parking:d.parking|| {count:0, stats:null}
-        };
-        const ev2=tracked[selKey];
-        if(!ev2.history) ev2.history=[];
-        const last=ev2.history[ev2.history.length-1];
-        if(!last||(new Date()-new Date(last.ts))>5000) ev2.history.push(freshPt);
-        renderDetail(selKey); renderChart(tracked[selKey]);
-      }
-      // Write to Sheets + Firestore in background
-      gasPost({action:'snapshot',src:'TE',snapshot:snap}).catch(()=>{});
-    }
-    // Reload full history — merges Sheets data with the in-memory point we just added
-    await loadHistory(selKey);
-    // Only re-render if we actually have data — don't wipe the chart if loadHistory
-    // couldn't get anything from Firestore or GAS
-    if (tracked[selKey] && (tracked[selKey].history||[]).filter(s=>s.floor>0).length > 0) {
-      renderDetail(selKey); renderChart(tracked[selKey]);
-    }
-    setSt('Ready');
-  } catch(e) { toast('Refresh failed: '+e.message,'err'); setSt('Ready'); }
-  btn.disabled=false; btn.textContent='Refresh';
-}
+// Manual refresh removed in Alpha 3.2
 
 async function removeSelected() {
   if (!selKey) return;
@@ -2095,6 +2072,7 @@ async function loadXItems() {
     // Filter out internal system items (price alerts, briefs)
     return docs
       .filter(d => !['price_alert','refresh_brief','alert','rss_match'].includes(d.source||''))
+      .filter(d => !!(d.post_text || d.title)) // drop blank cards (no source field = pre-schema items)
       .map(d=>{
         // fsWriteRssItem schema: league field, post_text, post_url, posted_at
         const league = d.league||d.feed_league||d.attr_league||'General';
@@ -2327,6 +2305,7 @@ async function startRealtimeListener() {
         renderSidebar();
         if (selKey) { renderDetail(selKey); renderChart(tracked[selKey]); }
         setSt('Updated ' + new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}));
+        if (selKey && tracked[selKey]?.event_id) startUpdateTimer(tracked[selKey].event_id);
       }
     } catch(e) {}
   }, 5 * 60 * 1000);
@@ -2349,14 +2328,19 @@ async function listenToTevo(token,pid) {
   // Listen to ALL new writes to tevo/ — no limit, no orderBy (no index needed).
   // We track last-seen ts per event to deduplicate on reconnect.
   const listenedSince = new Date(Date.now() - 5*60*1000).toISOString(); // last 5 min on connect
+  // Only stream tevo/ docs with snapshot_ts >= now-10min on connect.
+  // Prevents Firestore from replaying the entire collection as initial state sync
+  // (was causing 4000+ documentChange messages on every connect/reconnect).
+  const since = new Date(Date.now() - 10*60*1000).toISOString();
   const body=JSON.stringify({
     database:`projects/${pid}/databases/(default)`,
     addTarget:{query:{
       parent:`projects/${pid}/databases/(default)/documents`,
       structuredQuery:{
         from:[{collectionId:'tevo'}],
-        // Filter: only docs written in the last 5 min on connect, then stream all new ones
-        // No orderBy = no composite index required
+        where:{fieldFilter:{field:{fieldPath:'snapshot_ts'},
+          op:'GREATER_THAN_OR_EQUAL',
+          value:{timestampValue:since}}}
       }
     },targetId:1}
   });
@@ -2400,7 +2384,8 @@ async function listenToTevo(token,pid) {
           if(np.floor<=0||isNaN(np.floor)) continue;
           if((ev.history||[]).some(h=>h.ts===np.ts)) continue;
           // Sanity: floor < avg/8 means parking leaked through (e.g. $16/$407)
-          if(np.avg > 50 && np.floor < np.avg / 8) continue;
+          if(np.floor < 20) continue; // hard minimum — no real ticket < $20
+          if(np.avg > 50 && np.floor < np.avg / 6) continue; // parking leak
           if(!ev.history) ev.history=[];
           ev.history.push(np);
           ev.history.sort((a,b)=>a.ts.localeCompare(b.ts));

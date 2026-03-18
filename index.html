@@ -1452,7 +1452,6 @@ async function selectEvent(key) {
   const _dateStr = ev.occurs_at_local || (ev.date && /^\d{4}-/.test(ev.date) ? ev.date : '');
   document.getElementById('ev-meta').textContent =
     [(ev.venue||'').replace(/_/g,' '), _dateStr ? safeDate(_dateStr) : ''].filter(Boolean).join(' · ');
-  document.getElementById('btn-ref').disabled = false;
   document.getElementById('btn-rem').disabled = false;
 
   // Show data if already loaded
@@ -1873,7 +1872,6 @@ async function removeSelected() {
   document.getElementById('ev-meta').textContent='—';
   ['m-f','m-a','m-m','m-x','m-c'].forEach(id=>document.getElementById(id).textContent='—');
   ['m-fd','m-ad','m-md','m-xd','m-cd'].forEach(id=>document.getElementById(id).innerHTML='');
-  document.getElementById('btn-ref').disabled=true;
   document.getElementById('btn-rem').disabled=true;
   document.getElementById('lst-pill').style.display='none';
   document.getElementById('snap-info').style.display='none';

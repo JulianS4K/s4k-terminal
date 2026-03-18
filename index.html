@@ -1187,6 +1187,25 @@ async function loadTracked() {
     loadAllHistories().then(() => {
       renderSidebar(); setSt('Ready');
       startRealtimeListener();
+      // Fire one immediate poll right after load to catch anything written
+      // since we last fetched history (gap between loadAllHistories and now)
+      setTimeout(async () => {
+        try {
+          const trackedKeys = Object.keys(tracked);
+          for (const key of trackedKeys) {
+            const ev = tracked[key];
+            if (!ev.event_id) continue;
+            const idx   = await FS.getEventIndex(ev.event_id);
+            const fsTs  = idx?.last_snapshot_ts || '';
+            const memTs = (ev.history||[]).slice(-1)[0]?.ts || '';
+            if (fsTs && fsTs > memTs) {
+              await loadHistory(key);
+            }
+          }
+          renderSidebar();
+          if (selKey) { renderDetail(selKey); renderChart(tracked[selKey]); }
+        } catch(e) {}
+      }, 3000); // 3s after load — let SSE settle first
       if (!selKey) {
         const first = Object.keys(tracked)[0];
         if (first) selectEvent(first);
@@ -2262,42 +2281,46 @@ function renderFeed() {
 
 // ── Realtime updates ────────────────────────────────────────────
 async function startRealtimeListener() {
-  try {
-    const token=await FS.getToken();
-    if(!token) throw new Error('no token');
-    _realtimeActive=true;
-    const pid=await FS.getProjectId();
-    if(!pid) throw new Error('no project id');
-    listenToTevo(token,pid);
-  } catch(e) {
-    // Fall back to polling
-    // Polling fallback: check Firestore event_index every 5 min for new snapshot timestamps
-    snapshotPollTimer=setInterval(async()=>{
-      try {
-        // Check event_index for any last_snapshot_ts newer than what we have in memory
-        const trackedKeys = Object.keys(tracked);
-        if (!trackedKeys.length) return;
-        let anyNew = false;
-        for (const key of trackedKeys) {
-          const ev = tracked[key];
-          if (!ev.event_id) continue;
-          const idx = await FS.getEventIndex(ev.event_id);
-          if (!idx) continue;
-          const fsTs   = idx.last_snapshot_ts || '';
-          const memTs  = (ev.history||[]).slice(-1)[0]?.ts || '';
+  // ── Layer 1: Polling — always runs, guaranteed updates ─────────
+  // Checks event_index.last_snapshot_ts every 5 min per event.
+  // This is the reliable baseline regardless of SSE state.
+  if (snapshotPollTimer) clearInterval(snapshotPollTimer);
+  snapshotPollTimer = setInterval(async () => {
+    try {
+      const trackedKeys = Object.keys(tracked);
+      if (!trackedKeys.length) return;
+      let anyNew = false;
+      for (const key of trackedKeys) {
+        const ev = tracked[key];
+        if (!ev.event_id) continue;
+        try {
+          const idx   = await FS.getEventIndex(ev.event_id);
+          const fsTs  = idx?.last_snapshot_ts || '';
+          const memTs = (ev.history||[]).slice(-1)[0]?.ts || '';
           if (fsTs && fsTs > memTs) {
-            // New snapshot available — reload this event's history
             await loadHistory(key);
             anyNew = true;
           }
-        }
-        if (anyNew) {
-          renderSidebar();
-          if (selKey) { renderDetail(selKey); renderChart(tracked[selKey]); }
-          setSt('Updated ' + new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}));
-        }
-      } catch(e) {}
-    }, 5*60*1000);
+        } catch(e) {}
+      }
+      if (anyNew) {
+        renderSidebar();
+        if (selKey) { renderDetail(selKey); renderChart(tracked[selKey]); }
+        setSt('Updated ' + new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}));
+      }
+    } catch(e) {}
+  }, 5 * 60 * 1000);
+
+  // ── Layer 2: SSE — real-time ~2s updates when it works ─────────
+  // Additive on top of polling. If SSE drops, polling still runs.
+  _realtimeActive = true;
+  try {
+    const token = await FS.getToken();
+    const pid   = await FS.getProjectId();
+    if (token && pid) listenToTevo(token, pid);
+  } catch(e) {
+    // SSE failed to start — polling covers it
+    setSt('Polling (5m)');
   }
 }
 
@@ -2375,7 +2398,20 @@ async function listenToTevo(token,pid) {
         }catch(e){}
       }
     }
-  } catch(e){ if(_realtimeActive) setTimeout(async()=>{try{const t=await FS.getToken();listenToTevo(t,pid);}catch(e){}},4000); }
+  } catch(e) {
+    // SSE dropped — wait 8s then reconnect with a fresh token
+    if (_realtimeActive) {
+      const badge = document.getElementById('live-badge');
+      if (badge) badge.style.display = 'none';
+      setTimeout(async () => {
+        try {
+          const t = await FS.getToken(); // fresh token (old one may have expired)
+          const p = await FS.getProjectId();
+          if (t && p && _realtimeActive) listenToTevo(t, p);
+        } catch(re) {}
+      }, 8000);
+    }
+  }
 }
 
 // ── Init ────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- ================================================================
-     S4K Terminal — Alpha 3.3
+     S4K Terminal — Alpha 3.1
      Built: 2026-03-18
      Changes: Composite index query fix, orderBy server-side,
               limit 500, poll last_updated fallback, SSE sanity filter
@@ -423,7 +423,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   <div class="tab" onclick="showPanel('search',this)" id="tab-search">
     <span class="fk">F2</span>Search
   </div>
-  <div class="tab" onclick="showPanel('feed',this);setLF('matched',document.getElementById('pill-matched'));" id="tab-feed">
+  <div class="tab" onclick="showPanel('feed',this);setLF('matched',document.getElementById('pill-matched'));if(!feedItems.length||(Date.now()-lastFeedLoad>5*60*1000))loadFeed();" id="tab-feed">
     <span class="fk">F3</span>Feed
     <span class="tab-badge" id="feed-badge" style="display:none;">0</span>
   </div>
@@ -727,12 +727,12 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // ── State ──────────────────────────────────────────────────────
 const CKEY = 's4k_a30';
 // ================================================================
-// S4K Terminal — Alpha 3.3
+// S4K Terminal — Alpha 3.1
 // Build date:  2026-03-18
 // ----------------------------------------------------------------
 // Alpha 3.0  Firestore primary, Sheets removed, ESPN matching,
 //            4-tier cadence, auto-update dual-layer, Matched ★ tab
-// Alpha 3.3  Composite index query, orderBy server-side, limit 500,
+// Alpha 3.1  Composite index query, orderBy server-side, limit 500,
 //            poll last_updated fallback, SSE parking sanity filter
 // Alpha 3.2  Remove manual refresh → auto-update timer, SSE filter,
 //            chart debounce, token cache, session error state,
@@ -752,7 +752,7 @@ const APP_VERSION = 'Alpha 3.2';
 let tracked = {}, selKey = null;
 let chart = null, cmode = 'price';
 let son = {floor:true, med:false, avg:false, max:false};
-let xFeedItems = [], espnFeedItems = [], feedItems = [];
+let xFeedItems = [], espnFeedItems = [], feedItems = [], lastFeedLoad = 0;
 let eventFeedMap = {};
 let lfilt = 'matched', sfilt = null;
 let _nextUpdateMap = {};
@@ -2058,6 +2058,7 @@ async function loadFeed(silent=false) {
     xFeedItems=xRes.status==='fulfilled'?xRes.value:xFeedItems;
     espnFeedItems=espnRes.status==='fulfilled'?espnRes.value:espnFeedItems;
     feedItems=mergeAndMap(xFeedItems,espnFeedItems);
+    lastFeedLoad = Date.now();
     const matched=feedItems.filter(i=>i.matched||i.event_id).length;
     // Always update badge — even on silent background load
     const badge=document.getElementById('feed-badge');
@@ -2135,7 +2136,7 @@ async function loadEspnItems() {
       return {title:d.title||'',link:d.article_url||'',desc:d.description||'',
         pubDate:d.pub_date||d.received_ts||'',author:d.creator||'ESPN',handle:'',
         league:league.charAt(0).toUpperCase()+league.slice(1),
-        impact:d.impact||null,matched:!!(d.matched_event_id||d.matched),
+        impact:d.impact||null,matched:d.matched===true||d.matched==='keywords'||!!(d.matched_event_id),
         event_id:d.matched_event_id||'',event_name:d.matched_event_name||'',
         price_floor:0,keywords:(d.keywords_hit||'').split(',').filter(Boolean),srcType:'espn',
         affected_event_ids:[],affected_event_names:[]};
@@ -2231,11 +2232,22 @@ function renderFeed() {
   if(sfilt==='espn') items=items.filter(i=>i.srcType==='espn');
   if(lfilt&&lfilt!=='all'){
     if(lfilt==='matched') {
-      const trackedIds = new Set(Object.values(tracked).map(ev=>String(ev.event_id)));
-      const portfolioItems = items.filter(i => i.event_id && trackedIds.has(String(i.event_id)));
-      items = portfolioItems.length
-        ? portfolioItems
-        : items.filter(i => i.matched===true || i.matched==='yes' || !!(i.event_id));
+      const trackedIds     = new Set(Object.values(tracked).map(ev=>String(ev.event_id)));
+      const trackedLeagues = new Set(Object.values(tracked)
+        .map(ev=>(ev.category||'').toUpperCase()).filter(Boolean));
+      // Tier 1: directly linked to a tracked event (strongest match)
+      const eventLinked = items.filter(i => i.event_id && trackedIds.has(String(i.event_id)));
+      // Tier 2: keyword match in a tracked league (e.g. NHL trade news when tracking NHL events)
+      const leagueMatched = items.filter(i =>
+        !i.event_id &&
+        i.keywords && i.keywords.length > 0 &&
+        trackedLeagues.has((i.league||'').toUpperCase())
+      );
+      items = eventLinked.length
+        ? [...eventLinked, ...leagueMatched]
+        : leagueMatched.length
+          ? leagueMatched
+          : items.filter(i => i.matched===true || i.matched==='yes');
     }
     else if(lfilt==='event'){
       const ev=selKey?tracked[selKey]:null;

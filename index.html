@@ -400,7 +400,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   <div class="topbar-right">
     <span id="st-bar"></span>
     <span id="clock"></span>
-    <span class="ver-pill" id="ver-badge">Alpha 2.8</span>
+    <span class="ver-pill" id="ver-badge">Alpha 2.9</span>
   </div>
 </div>
 
@@ -568,7 +568,30 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
               onkeydown="if(event.key==='Enter')searchTE()"/>
             <button class="btn primary" onclick="searchTE()">Search</button>
           </div>
-          <div class="search-hint" id="s-hint">Search for NBA, NFL, NHL, MLB events or concerts. Results show live pricing from TEvo.</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <label style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;">From</label>
+              <input type="date" id="s-date-from" class="s-input"
+                style="width:130px;font-size:11px;padding:4px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--text);"/>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <label style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;">To</label>
+              <input type="date" id="s-date-to" class="s-input"
+                style="width:130px;font-size:11px;padding:4px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--text);"/>
+            </div>
+            <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);cursor:pointer;">
+              <input type="checkbox" id="s-tickets-only" style="cursor:pointer;"/>
+              With tickets only
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);cursor:pointer;">
+              <input type="checkbox" id="s-upcoming-only" checked style="cursor:pointer;"/>
+              Upcoming only
+            </label>
+            <span id="s-page-info" style="font-size:10px;color:var(--muted);margin-left:auto;"></span>
+            <button class="btn btn-sm" id="s-prev" onclick="searchPage(-1)" style="display:none;">← Prev</button>
+            <button class="btn btn-sm" id="s-next" onclick="searchPage(1)" style="display:none;">Next →</button>
+          </div>
+          <div class="search-hint" id="s-hint">Search NBA, NFL, NHL, MLB, concerts. Up to 50 results per page.</div>
           <div id="s-results"></div>
         </div>
       </div>
@@ -671,13 +694,13 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // ================================================================
 
 // ── State ──────────────────────────────────────────────────────
-const CKEY = 's4k_a28';
-const APP_VERSION = 'Alpha 2.8';
+const CKEY = 's4k_a29';
+const APP_VERSION = 'Alpha 2.9';
 
 // Migrate GAS URL from previous versions
 (function migrate() {
   if (localStorage.getItem(CKEY)) return;
-  for (const k of ['s4k_a27','s4k_a26','s4k_a25','s4k_a24']) {
+  for (const k of ['s4k_a28','s4k_a27','s4k_a26','s4k_a25']) {
     const v = localStorage.getItem(k);
     if (v) { localStorage.setItem(CKEY, v); break; }
   }
@@ -1620,12 +1643,35 @@ async function refreshSelected() {
   setSt(`Refreshing ${r.name}…`);
   try {
     const d = await gasGet({
-      action:'fetch_te', event_id:r.event_id,
+      action:'fetch_te', event_id:r.event_id, manual:'true',
       name:encodeURIComponent(r.name||''),
       venue:encodeURIComponent(r.venue||''),
       performer:encodeURIComponent(r.performer||''),
       date:r.date||''
     });
+    // Cooldown gate — server rejected the request
+    if (d.cooldown) {
+      toast(`Too soon — next refresh in ${d.remaining_label}`, 'warn');
+      setSt(`Refresh blocked · next in ${d.remaining_label}`);
+      btn.disabled=false; btn.textContent='Refresh';
+      // Show countdown on button until cooldown clears
+      let secsLeft = d.remaining_secs;
+      const countdown = setInterval(() => {
+        secsLeft--;
+        if (secsLeft <= 0) {
+          clearInterval(countdown);
+          btn.textContent='Refresh';
+          btn.disabled=false;
+          setSt('Ready');
+        } else {
+          const m=Math.floor(secsLeft/60), s=secsLeft%60;
+          btn.textContent=`${m>0?m+'m ':''}${s}s`;
+          btn.disabled=true;
+        }
+      }, 1000);
+      return;
+    }
+
     if(d.ok && d.stats) {
       const s=d.stats;
       const snap={
@@ -1694,38 +1740,82 @@ async function refreshAll(el) {
 }
 
 // ── Search ──────────────────────────────────────────────────────
-async function searchTE() {
+let _searchPage = 1;
+let _searchTotal = 0;
+
+async function searchPage(dir) {
+  _searchPage = Math.max(1, _searchPage + dir);
+  await searchTE(false);
+}
+
+async function searchTE(resetPage=true) {
   const q = document.getElementById('s-input').value.trim();
   if(!q) return;
-  const hint=document.getElementById('s-hint');
-  const res=document.getElementById('s-results');
+  if (resetPage) _searchPage = 1;
+
+  const hint    = document.getElementById('s-hint');
+  const res     = document.getElementById('s-results');
+  const dateFrom= document.getElementById('s-date-from')?.value || '';
+  const dateTo  = document.getElementById('s-date-to')?.value || '';
+  const tickOnly= document.getElementById('s-tickets-only')?.checked || false;
+  const upcoming= document.getElementById('s-upcoming-only')?.checked || true;
+
   hint.textContent='Searching…';
-  res.innerHTML='';
+
+  // Build query params
+  const params = {
+    action: 'search_te',
+    q: encodeURIComponent(q),
+    per_page: '50',
+    page: String(_searchPage)
+  };
+  // Date range filter — ISO format required by TEvo
+  if (dateFrom) params.occurs_at_gte = dateFrom + 'T00:00:00Z';
+  if (dateTo)   params.occurs_at_lte = dateTo   + 'T23:59:59Z';
+  // Upcoming only — default to today forward
+  if (upcoming && !dateFrom) params.occurs_at_gte = new Date().toISOString().split('T')[0] + 'T00:00:00Z';
+  // Only show events with tickets
+  if (tickOnly) params.only_with_available_tickets = 'true';
+
   try {
-    const d = await gasGet({action:'search_te',q:encodeURIComponent(q)});
-    const events=d.events||[];
-    hint.textContent=events.length?events.length+' results':'No results found';
-    const trackedIds=new Set(Object.values(tracked).map(t=>String(t.event_id)));
-    res.innerHTML=events.slice(0,20).map(ev=>{
-      const isTracked=trackedIds.has(String(ev.id));
-      const date=safeDate(ev.occurs_at,{month:'short',day:'numeric',year:'numeric'});
-      const floor=ev.floor?fmt(ev.floor):'';
-      const count=ev.count?fmtC(ev.count)+' listings':'';
+    const d = await gasGet(params);
+    const events  = d.events || [];
+    _searchTotal  = d.total_entries || events.length;
+    const totalPgs= Math.ceil(_searchTotal / 50);
+
+    hint.textContent = _searchTotal
+      ? `${_searchTotal} result${_searchTotal!==1?'s':''} · page ${_searchPage} of ${totalPgs}`
+      : 'No results found';
+
+    // Pagination controls
+    const prev = document.getElementById('s-prev');
+    const next = document.getElementById('s-next');
+    const pi   = document.getElementById('s-page-info');
+    if(prev) prev.style.display = _searchPage > 1 ? '' : 'none';
+    if(next) next.style.display = _searchPage < totalPgs ? '' : 'none';
+    if(pi)   pi.textContent = _searchTotal > 50 ? `${_searchTotal} total` : '';
+
+    const trackedIds = new Set(Object.values(tracked).map(t=>String(t.event_id)));
+    res.innerHTML = events.map(ev => {
+      const isTracked = trackedIds.has(String(ev.id));
+      const date = safeDate(ev.occurs_at, {month:'short',day:'numeric',year:'numeric'});
+      const avail = ev.available_count||ev.products_count||0;
+      const pop   = ev.popularity_score ? Math.round(ev.popularity_score*10)/10 : null;
       return `<div class="sr-card">
         <div class="sr-info">
           <div class="sr-name">${ev.name||'Unnamed'}</div>
           <div class="sr-meta">${ev.venue?.name||''}${date?' · '+date:''}</div>
+          ${pop?`<div style="font-size:10px;color:var(--muted);margin-top:2px;">Pop score: ${pop} · ${fmtC(avail)} listings</div>`:''}
         </div>
-        ${floor?`<div class="sr-price"><div class="sr-floor">${floor}</div><div class="sr-count">${count}</div></div>`:''}
         <div class="sr-actions">
-          <button class="track-btn${isTracked?' tracked':''}" 
+          <button class="track-btn${isTracked?' tracked':''}"
             id="tr-${ev.id}" ${isTracked?'disabled':''}
-            onclick="trackEvent(${ev.id},'${(ev.name||'').replace(/'/g,'')}','${(ev.venue?.name||'').replace(/'/g,'')}','${(ev.venue?.location||'').replace(/'/g,'')}','${ev.venue?.id||''}','${(ev.performances?.[0]?.name||'').replace(/'/g,'')}','${ev.performances?.[0]?.performer_id||''}','${ev.occurs_at||''}')"
+            onclick="trackEvent(${ev.id},'${(ev.name||'').replace(/'/g,"\'")}','${(ev.venue?.name||'').replace(/'/g,"\'")}','${(ev.venue?.location||'').replace(/'/g,"\'")}','${ev.venue?.id||''}','${(ev.performances?.[0]?.name||'').replace(/'/g,"\'")}','${ev.performances?.[0]?.performer_id||''}','${ev.occurs_at||''}')"
           >${isTracked?'Tracked ✓':'Track'}</button>
         </div>
       </div>`;
     }).join('');
-  } catch(e){ hint.textContent='Search failed: '+e.message; }
+  } catch(e) { hint.textContent='Search failed: '+e.message; }
 }
 
 async function trackEvent(eid,name,venue,venueLocation,venueId,perf,perfId,date) {

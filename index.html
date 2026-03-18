@@ -386,7 +386,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   <div class="topbar-right">
     <span id="st-bar"></span>
     <span id="clock"></span>
-    <span class="ver-pill" id="ver-badge">Alpha 2.2</span>
+    <span class="ver-pill" id="ver-badge">Alpha 2.3</span>
   </div>
 </div>
 
@@ -615,13 +615,13 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 // ================================================================
 
 // ── State ──────────────────────────────────────────────────────
-const CKEY = 's4k_a22';
-const APP_VERSION = 'Alpha 2.2';
+const CKEY = 's4k_a23';
+const APP_VERSION = 'Alpha 2.3';
 
 // Migrate GAS URL from previous versions
 (function migrate() {
   if (localStorage.getItem(CKEY)) return;
-  for (const k of ['s4k_a21','s4k_a20','s4k_v526','s4k_v5']) {
+  for (const k of ['s4k_a22','s4k_a21','s4k_a20','s4k_v526']) {
     const v = localStorage.getItem(k);
     if (v) { localStorage.setItem(CKEY, v); break; }
   }
@@ -1036,6 +1036,10 @@ async function loadTracked() {
       if (!selKey) {
         const first = Object.keys(tracked)[0];
         if (first) selectEvent(first);
+      } else if (tracked[selKey]) {
+        // Already selected — just re-render with fresh history, don't re-trigger select
+        renderDetail(selKey);
+        renderChart(tracked[selKey]);
       }
     }).catch(() => setSt('Ready'));
 
@@ -1056,7 +1060,7 @@ async function loadHistory(key) {
   try {
     const snaps = await FS.getEventSnapshots(ev.event_id, 1000);
     if (snaps && snaps.length > 0) {
-      ev.history = snaps
+      const mapped = snaps
         .map(s => ({
           ts:     s.snapshot_ts||'',
           floor:  Math.round(Number(s.floor||0)),
@@ -1068,7 +1072,10 @@ async function loadHistory(key) {
         .filter(s => s.floor>0 && s.avg>0)
         .map(s => ({...s, max: s.max>s.floor*20 ? s.avg*3 : s.max}))
         .sort((a,b) => a.ts.localeCompare(b.ts));
-      loaded = true;
+      // Only trust Firestore result if it contains valid priced snapshots.
+      // Old broken docs (0:"3" format) map to floor=0 and filter out.
+      // Fall through to GAS if nothing survives the filter.
+      if (mapped.length > 0) { ev.history = mapped; loaded = true; }
     }
   } catch(e) {}
 
@@ -1146,10 +1153,8 @@ async function selectEvent(key) {
   // Show data if already loaded
   if (ev.history && ev.history.length) {
     renderDetail(key); renderChart(tracked[key]);
-  } else {
-    setSt(`Loading ${ev.name}…`);
-    ['m-f','m-a','m-m','m-x','m-c'].forEach(id=>{ const el=document.getElementById(id); if(el)el.textContent='…'; });
   }
+  // Keep metrics showing last good values if history not loaded yet
 
   // Update event feed strip
   updateEventFeedStrip(key);
@@ -1161,13 +1166,24 @@ async function selectEvent(key) {
 
 function renderDetail(key) {
   const r = tracked[key]; if (!r) return;
-  const h = (r.history||[]).filter(s=>s.floor>0);
+  const allSnaps = r.history||[];
+  const h = allSnaps.filter(s=>s.floor>0);
   const lat = h.length ? h[h.length-1] : null;
   const prev = h.length>1 ? h[h.length-2] : null;
 
   document.getElementById('ev-title').textContent = r.name||'—';
   document.getElementById('ev-meta').textContent =
     [(r.venue||'').replace(/_/g,' '), safeDate(r.date)].filter(Boolean).join(' · ');
+
+  // Diagnostic: snapshots loaded but all have floor=$0 (old broken Firestore docs)
+  if (allSnaps.length > 0 && h.length === 0) {
+    const si=document.getElementById('snap-info'); if(si) si.style.display='flex';
+    const sc=document.getElementById('snap-count');
+    if(sc) sc.textContent=allSnaps.length+' snapshot'+(allSnaps.length!==1?'s':'')+' (floor=$0 — hit Refresh)';
+    const msg=document.getElementById('empty-msg');
+    if(msg) msg.textContent='Snapshots have floor=$0 — hit Refresh to write a fresh one';
+    return;
+  }
 
   if (lat) {
     const sv = (id,val,delta) => {
@@ -1462,8 +1478,20 @@ async function refreshSelected() {
         floor_delta:0, avg_delta:0, median_delta:0, count_delta:0,
         days_until_delta:0, price_buckets:{}, data_source:'listings'
       };
-      await gasPost({action:'snapshot',src:'TE',snapshot:snap});
+      // Push to memory immediately — chart shows NOW without round-trip
+      if (snap.floor > 0 && tracked[selKey]) {
+        const freshPt={ts:new Date().toISOString(),floor:snap.floor,avg:snap.avg,
+                       median:snap.median,max:snap.max,count:snap.count};
+        const ev2=tracked[selKey];
+        if(!ev2.history) ev2.history=[];
+        const last=ev2.history[ev2.history.length-1];
+        if(!last||(new Date()-new Date(last.ts))>5000) ev2.history.push(freshPt);
+        renderDetail(selKey); renderChart(tracked[selKey]);
+      }
+      // Write to Sheets + Firestore in background
+      gasPost({action:'snapshot',src:'TE',snapshot:snap}).catch(()=>{});
     }
+    // Reload full history to get all historical points
     await loadHistory(selKey);
     renderDetail(selKey); renderChart(tracked[selKey]);
     setSt('Ready');

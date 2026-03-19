@@ -411,7 +411,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   <div class="topbar-right">
     <span id="st-bar"></span>
     <span id="clock"></span>
-    <span class="ver-pill" id="ver-badge">Alpha 1.0</span>
+    <span class="ver-pill" id="ver-badge">Alpha 2.0</span>
   </div>
 </div>
 
@@ -422,6 +422,9 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   </div>
   <div class="tab" onclick="showPanel('search',this)" id="tab-search">
     <span class="fk">F2</span>Search
+  </div>
+  <div class="tab" onclick="showPanel('explore',this);initExplorer();" id="tab-explore">
+    F5 <span class="tab-label">Explore</span>
   </div>
   <div class="tab" onclick="showPanel('feed',this);setLF('matched',document.getElementById('pill-matched'));if(!feedItems.length||(Date.now()-lastFeedLoad>5*60*1000))loadFeed();" id="tab-feed">
     <span class="fk">F3</span>Feed
@@ -677,6 +680,51 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
     </div>
 
     <!-- F4: Settings -->
+      <!-- ══ VENUE INTELLIGENCE ════════════════════════════════ -->
+      <div id="intel-panel" style="display:none;margin:0 0 8px;padding:10px 14px;
+           background:var(--card);border:1px solid var(--border);border-radius:6px;font-size:11px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <span style="font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--muted);">VENUE INTELLIGENCE</span>
+          <span id="intel-matchup" style="color:var(--text2);font-size:10px;"></span>
+        </div>
+        <div id="intel-loading" style="color:var(--muted);font-style:italic;font-size:11px;">Loading…</div>
+        <div id="intel-body" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;"></div>
+        <div id="intel-curve" style="margin-top:8px;display:none;">
+          <div style="font-size:9px;color:var(--muted);margin-bottom:4px;">DAYS-OUT CURVE</div>
+          <div id="intel-curve-bars" style="display:flex;gap:3px;align-items:flex-end;height:32px;"></div>
+          <div id="intel-curve-labels" style="display:flex;gap:3px;margin-top:2px;font-size:9px;color:var(--muted);"></div>
+        </div>
+      </div>
+      <!-- Section breakdown — top sections by ticket qty, row range in tooltip -->
+      <div id="section-strip" style="display:none;flex-wrap:wrap;gap:4px;padding:6px 14px;border-bottom:1px solid var(--border);"></div>
+      <!-- Market signals — in-hand%, singles%, dominant format -->
+      <div id="market-signals" style="display:none;flex-wrap:wrap;gap:4px;padding:4px 14px 6px;border-bottom:1px solid var(--border);"></div>
+
+      <!-- ══ F5 EXPLORER ════════════════════════════════════════ -->
+      <div class="panel" id="panel-explore">
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <span style="font-size:10px;font-weight:700;letter-spacing:.1em;color:var(--muted);">INTELLIGENCE EXPLORER</span>
+          <div style="display:flex;gap:5px;flex-wrap:wrap;">
+            <button class="exp-pill active" id="ep-all"            onclick="setExpType('all',this)">Overview</button>
+            <button class="exp-pill"        id="ep-performer_away" onclick="setExpType('performer_away',this)">Away</button>
+            <button class="exp-pill"        id="ep-performer_home" onclick="setExpType('performer_home',this)">Home</button>
+            <button class="exp-pill"        id="ep-venue"          onclick="setExpType('venue',this)">Venue</button>
+            <button class="exp-pill"        id="ep-matchup"        onclick="setExpType('matchup',this)">Matchup</button>
+          </div>
+          <select id="exp-performer" class="exp-select" onchange="runExplorer()" style="display:none;"><option value="">All performers</option></select>
+          <select id="exp-venue-sel" class="exp-select" onchange="runExplorer()" style="display:none;"><option value="">All venues</option></select>
+          <select id="exp-category"  class="exp-select" onchange="runExplorer()">
+            <option value="">All categories</option>
+            <option value="nba">NBA</option><option value="nhl">NHL</option>
+            <option value="nfl">NFL</option><option value="mlb">MLB</option>
+            <option value="concert">Concert</option>
+          </select>
+          <button class="btn btn-sm" onclick="runExplorer()" style="margin-left:auto;">↺ Query</button>
+        </div>
+        <div id="exp-status" style="padding:6px 16px;font-size:11px;color:var(--muted);min-height:24px;"></div>
+        <div id="exp-results" style="padding:0 16px 16px;overflow-y:auto;flex:1;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;align-content:start;margin-top:8px;"></div>
+      </div>
+
     <div class="panel" id="panel-settings">
       <div class="panel-head">
         <div class="panel-title">Settings</div>
@@ -734,13 +782,13 @@ const CKEY = 's4k_a30';
 //            4-tier cadence, auto-update dual-layer, Matched ★ tab
 // Alpha 3.1  Composite index query, orderBy server-side, limit 500,
 //            poll last_updated fallback, SSE parking sanity filter
-// Alpha 1.0  Production release — Schema v3 complete, all connector issues resolved
+// Alpha 2.0  DbClient · fsBatchWrite · SQL flat schema · zone foundation · F5 Explorer
 // Alpha 3.3  Schema v3: flat tevo/ docs, unified feed_items, price_slots map
 // Alpha 3.2  Remove manual refresh → auto-update timer, SSE filter,
 //            chart debounce, token cache, session error state,
 //            sanity filter tightened, blank feed card fix, ET timezone
 // ================================================================
-const APP_VERSION = 'Alpha 1.0';
+const APP_VERSION = 'Alpha 2.0';
 
 // Migrate GAS URL from previous versions
 (function migrate() {
@@ -1348,7 +1396,14 @@ async function loadHistory(key) {
                 qty: Number(s.owned_qty||0), groups: oc,
                 vs_market_floor: Number(s.owned_vs_mkt||0)
               } : null
-            }
+            },
+            sections:          s.sections          || {},
+            format_mix:        s.format_mix        || {},
+            price_buckets:     s.price_buckets     || {},
+            bucket_thresholds: s.bucket_thresholds || [],
+            in_hand_pct:       Number(s.in_hand_pct ||0),
+            instant_pct:       Number(s.instant_pct ||0),
+            split_1_pct:       Number(s.split_1_pct ||0),
           };
         })
         .filter(s => s.floor>0 && s.avg>0)
@@ -1511,7 +1566,7 @@ async function selectEvent(key) {
   updateEventFeedStrip(key);
 
   // Load history + markers in parallel
-  await Promise.allSettled([loadHistory(key), loadEventFeedMarkers(key)]);
+  await Promise.allSettled([loadHistory(key), loadEventFeedMarkers(key), loadIntelligence(key)]);
   if (selKey===key) { renderDetail(key); renderChart(tracked[key]); setSt('Ready'); }
 }
 
@@ -1607,6 +1662,35 @@ function renderDetail(key) {
       }
     } else {
       if (ownedStrip) ownedStrip.style.display = 'none';
+    }
+
+    // ── Section breakdown strip ─────────────────────────────────
+    // Sorted by floor ascending (cheapest first = natural section order).
+    // row_min/row_max in tooltip = zone split boundary reference.
+    // CHART TRACK HOOK: clicking chip → future zone chart layer (Alpha 2.1).
+    const secEl=document.getElementById('section-strip');
+    if(secEl&&lat.sections&&Object.keys(lat.sections).length>0){
+      const topSecs=Object.entries(lat.sections).filter(([,s])=>s.floor>0)
+        .sort((a,b)=>a[1].floor-b[1].floor).slice(0,6);
+      secEl.innerHTML=topSecs.map(([name,s])=>
+        `<div class="sec-chip" title="${name}: ${s.listings} listings · ${fmtC(s.qty)} tix · ws ${fmt(s.ws_floor)}${s.row_min?` · rows ${s.row_min}–${s.row_max||'?'}`:''}">
+          <span class="sc-name">${name.substring(0,8)}</span>
+          <span class="sc-floor">${fmt(s.floor)}</span>
+          <span class="sc-qty">${fmtC(s.qty)}tk</span>
+        </div>`).join('');
+      secEl.style.display='flex';
+    } else if(secEl) secEl.style.display='none';
+
+    // ── Market signals ───────────────────────────────────────────
+    const sigEl=document.getElementById('market-signals');
+    if(sigEl){
+      const sigs=[];
+      if(lat.in_hand_pct>0) sigs.push(`<span class="sig-pill" title="Seller has tickets in hand now">${Math.round(lat.in_hand_pct*100)}% in-hand</span>`);
+      if(lat.split_1_pct>0) sigs.push(`<span class="sig-pill" title="Listings offering single tickets">${Math.round(lat.split_1_pct*100)}% singles</span>`);
+      const tf=lat.format_mix?Object.entries(lat.format_mix).sort((a,b)=>b[1]-a[1])[0]:null;
+      if(tf&&tf[1]>0.3) sigs.push(`<span class="sig-pill" title="Dominant delivery format">${tf[0].replace(/_/g,' ')} ${Math.round(tf[1]*100)}%</span>`);
+      sigEl.innerHTML=sigs.join('');
+      sigEl.style.display=sigs.length?'flex':'none';
     }
 
     // ── Parking toggle visibility ─────────────────────────────────
@@ -1916,6 +2000,9 @@ async function removeSelected() {
   ['m-fd','m-ad','m-md','m-xd','m-cd'].forEach(id=>document.getElementById(id).innerHTML='');
   document.getElementById('btn-ref').disabled=true;
   document.getElementById('btn-rem').disabled=true;
+  ['intel-panel','section-strip','market-signals'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.style.display='none';
+  });
   document.getElementById('lst-pill').style.display='none';
   document.getElementById('snap-info').style.display='none';
   document.getElementById('empty-ch').style.display='flex';
@@ -2458,6 +2545,13 @@ async function listenToTevo(token,pid) {
             avg_split:     Number(snap.avg_split    ||0),
             section_count: Number(snap.section_count||0),
             source_label:  snap.data_source==='stats' ? 'TEvo Stats' : 'TEvo Live',
+            sections:          snap.sections          || {},
+            format_mix:        snap.format_mix        || {},
+            price_buckets:     snap.price_buckets     || {},
+            bucket_thresholds: snap.bucket_thresholds || [],
+            in_hand_pct:       Number(snap.in_hand_pct ||0),
+            instant_pct:       Number(snap.instant_pct ||0),
+            split_1_pct:       Number(snap.split_1_pct ||0),
             owned: _oc > 0 ? {
               count:_oc, qty:Number(snap.owned_qty||0),
               stats:{retail:{floor:Number(snap.owned_floor||0),avg:Number(snap.owned_avg||0)},
@@ -2504,6 +2598,214 @@ async function listenToTevo(token,pid) {
     }
   }
 }
+
+
+// ════════════════════════════════════════════════════════════════
+// VENUE INTELLIGENCE  (F-key panel, shown on event select)
+// Loads from action=get_intelligence → BaselineEngine.getEventIntelligence()
+// 3 point reads: venue_cat_baselines, venue_home_baselines, matchup_matrix
+// 15-min session cache per event_id.
+// DEV NOTE: chatbot will call these same GAS endpoints via natural language.
+// ════════════════════════════════════════════════════════════════
+let _intelCache={};
+async function loadIntelligence(key){
+  const ev=tracked[key]; if(!ev||!ev.event_id) return;
+  const panel=document.getElementById('intel-panel');
+  const body=document.getElementById('intel-body');
+  const load=document.getElementById('intel-loading');
+  if(!panel) return;
+  panel.style.display='block';
+  if(body) body.innerHTML='';
+  if(load){load.style.display='block';load.textContent='Loading…';}
+  const cid=String(ev.event_id);
+  const cached=_intelCache[cid];
+  if(cached&&Date.now()-cached._ts<15*60*1000){renderIntelligence(cached,ev);return;}
+  try{
+    const d=await gasGet({action:'get_intelligence',event_id:ev.event_id});
+    if(!d||!d.ok){if(load)load.textContent='No baseline data yet';return;}
+    d._ts=Date.now();_intelCache[cid]=d;renderIntelligence(d,ev);
+  }catch(e){if(load)load.textContent='Unavailable';}
+}
+function renderIntelligence(d,ev){
+  const body=document.getElementById('intel-body');
+  const load=document.getElementById('intel-loading');
+  const mEl=document.getElementById('intel-matchup');
+  const curv=document.getElementById('intel-curve');
+  if(!body) return;
+  if(load) load.style.display='none';
+  if(mEl){
+    const szn=d.season_type==='playoff'?'🏆 PLAYOFFS':d.season_type==='preseason'?'PRESEASON':'';
+    const dow=d.day_of_week?d.day_of_week.substring(0,3).toUpperCase():'';
+    const hr=d.local_hour!=null?(d.local_hour>12?(d.local_hour-12)+'pm ET':d.local_hour+'am ET'):'';
+    mEl.textContent=[szn,dow,hr].filter(Boolean).join(' · ');
+  }
+  const cells=[];
+  if(d.venue_cat&&d.venue_cat.samples>=2)
+    cells.push(iCard(d.venue+' base',fmt(d.venue_cat.floor_avg),d.venue_cat.samples+' games','iy'));
+  else cells.push(iCard('Venue baseline','—','Need 2+ samples','im'));
+  if(d.venue_home&&d.venue_home.samples>=2)
+    cells.push(iCard((d.home_performer||'Home')+' home',fmt(d.venue_home.floor_avg),d.venue_home.samples+' games','iy'));
+  else cells.push(iCard(d.home_performer||'Home','—','Need 2+ samples','im'));
+  if(d.matchup&&d.matchup.samples>=2&&d.matchup.opponent_premium_floor!=null){
+    const p=d.matchup.opponent_premium_floor,pc=d.matchup.opponent_premium_pct;
+    const sign=p>=0?'+':'';const cls=p>10?'ip':p<-10?'in':'iy';
+    cells.push(iCard((d.away_performer||'Visitor')+' premium',sign+'$'+Math.abs(p).toFixed(0),sign+(pc||0)+'% vs home · '+d.matchup.samples+' matchups',cls));
+  } else if(d.matchup&&d.matchup.samples>0)
+    cells.push(iCard(d.away_performer||'Visitor','~',d.matchup.samples+' tracked (need 3+)','im'));
+  else cells.push(iCard(d.away_performer||'Visitor','—',d.away_performer?'No matchup history yet':'Solo/concert event','im'));
+  body.innerHTML=cells.join('');
+  const curve=d.matchup?.days_out_curve||d.venue_home?.days_out_curve;
+  if(curve&&Object.keys(curve).length>=2&&curv){renderICurve(curve,ev);curv.style.display='block';}
+  else if(curv) curv.style.display='none';
+}
+function iCard(lbl,val,sub,cls){
+  return '<div class="intel-stat"><div class="il">'+lbl+'</div><div class="iv '+cls+'">'+val+'</div><div class="is">'+sub+'</div></div>';
+}
+function renderICurve(curve,ev){
+  const bars=document.getElementById('intel-curve-bars');
+  const lbls=document.getElementById('intel-curve-labels');
+  if(!bars||!lbls) return;
+  const BKT=[{k:'d14',l:'14d'},{k:'d7',l:'7d'},{k:'d3',l:'3d'},{k:'d1',l:'1d'},{k:'d0',l:'Day'}];
+  const dOut=ev.date?Math.max(0,Math.round((new Date(ev.date)-Date.now())/864e5)):null;
+  const cur=dOut!=null?(dOut>=14?'d14':dOut>=7?'d7':dOut>=3?'d3':dOut>=1?'d1':'d0'):null;
+  const vals=BKT.map(b=>curve[b.k]?.floor_avg||0),mx=Math.max(...vals,1);
+  bars.innerHTML=BKT.map(b=>{const v=curve[b.k]?.floor_avg||0,n=curve[b.k]?.samples||0;
+    const pct=Math.max(4,Math.round(v/mx*100));const ic=b.k===cur;
+    return '<div style="flex:1;background:'+(ic?'var(--teal)':'var(--green)')+';opacity:'+(n?ic?1:.55:.15)+';height:'+pct+'%;border-radius:2px 2px 0 0;" title="'+b.l+': '+(v?fmt(v):'—')+(n?' ('+n+'x)':'')+'"></div>';
+  }).join('');
+  lbls.innerHTML=BKT.map(b=>'<span style="flex:1;text-align:center;'+(b.k===cur?'color:var(--teal);font-weight:700;':'')+'">'+(curve[b.k]?.floor_avg?fmt(curve[b.k].floor_avg):b.l)+'</span>').join('');
+}
+
+// ════════════════════════════════════════════════════════════════
+// INTELLIGENCE EXPLORER — F5 screen
+// DEV NOTE: this IS the chatbot knowledge layer.
+//   Current: dropdown selectors → structured GAS queries
+//   Future (Alpha 3.x): natural language → same GAS endpoints
+//   Collections: matchup_matrix, venue_home_baselines,
+//   venue_cat_baselines — all <200 docs, fast GAS scan.
+//   Entities (performers + venues) loaded once from event_index
+//   + matchup_matrix on first F5 open, session-cached.
+// ════════════════════════════════════════════════════════════════
+let _expType='all',_expEntities=null,_expLoading=false;
+async function initExplorer(){
+  if(_expEntities){runExplorer();return;}
+  const st=document.getElementById('exp-status');
+  if(st)st.textContent='Loading entities…';
+  try{
+    const d=await gasGet({action:'get_tracked_entities'});
+    if(!d||!d.ok){if(st)st.textContent='Could not load';return;}
+    _expEntities=d;
+    const ps=document.getElementById('exp-performer');
+    const vs=document.getElementById('exp-venue-sel');
+    if(ps&&d.performers)d.performers.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.name;ps.appendChild(o);});
+    if(vs&&d.venues)d.venues.forEach(v=>{const o=document.createElement('option');o.value=v.id;o.textContent=v.name+(v.city?' · '+v.city:'');vs.appendChild(o);});
+    runExplorer();
+  }catch(e){if(st)st.textContent='Error: '+e.message;}
+}
+function setExpType(type,btn){
+  _expType=type;
+  document.querySelectorAll('.exp-pill').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  const show=(ids)=>['exp-performer','exp-venue-sel'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.style.display=ids.includes(id)?'':'none';
+  });
+  if(['performer_away','performer_home','matchup'].includes(type)) show(['exp-performer']);
+  else if(type==='venue') show(['exp-venue-sel']);
+  else show([]);
+  runExplorer();
+}
+async function runExplorer(){
+  if(_expLoading)return; _expLoading=true;
+  const st=document.getElementById('exp-status');
+  const res=document.getElementById('exp-results');
+  if(st)st.textContent='Querying…';if(res)res.innerHTML='';
+  const perfId=document.getElementById('exp-performer')?.value||'';
+  const venId=document.getElementById('exp-venue-sel')?.value||'';
+  const cat=document.getElementById('exp-category')?.value||'';
+  try{
+    const d=await gasGet({action:'explore_intelligence',query_type:_expType,performer_id:perfId,venue_id:venId,category:cat});
+    if(!d||!d.ok){if(st)st.textContent='Error: '+(d?.error||'unknown');_expLoading=false;return;}
+    renderExpResults(d,st,res);
+  }catch(e){if(st)st.textContent='Error: '+e.message;}
+  _expLoading=false;
+}
+function renderExpResults(d,st,res){
+  const type=d.query_type,results=d.results;
+  if(type==='all'){
+    if(st)st.textContent=(results.matchups||0)+' matchups · '+(results.matchups_with_premium||0)+' with premium · '+(results.venue_categories||0)+' baselines';
+    if(!res)return;
+    let html='';
+    if(results.top_premiums?.length){html+=expSec('🔺 Highest Visitor Premiums');html+=results.top_premiums.map(r=>expMMCard(r.home,r.away,r.venue,r.premium,null,r.samples,{})).join('');}
+    if(results.top_discount?.length){html+=expSec('🔻 Biggest Visitor Discounts');html+=results.top_discount.map(r=>expMMCard(r.home,r.away,r.venue,r.premium,null,r.samples,{})).join('');}
+    if(!html)html=expEmpty('No data yet','Run baselineUpdateTrigger() · collect 3+ snapshots per event');
+    res.innerHTML=html;
+  }else if(type==='performer_away'||type==='performer_home'){
+    const lbl=type==='performer_away'?'away':'home';
+    const cnt=Array.isArray(results)?results.length:0;
+    if(st)st.textContent=cnt+' '+lbl+' entries';
+    if(!res||!cnt){if(res)res.innerHTML=expEmpty('No '+lbl+' data','Track more events to build baselines');return;}
+    res.innerHTML=results.map(r=>`<div class="exp-card">
+      <div class="ec-title">${r.away_performer||r.home_performer||'—'} @ ${r.venue||'—'}</div>
+      <div class="ec-sub">${r.category||''} · ${r.venue_city||''} · ${r.samples} sample${r.samples===1?'':'s'}</div>
+      <div class="ec-metrics">
+        <div class="ec-m"><div class="ec-ml">Floor avg</div><div class="ec-mv">${fmt(r.floor_avg)}</div></div>
+        <div class="ec-m"><div class="ec-ml">Avg avg</div><div class="ec-mv">${fmt(r.avg_avg)}</div></div>
+        ${r.opponent_premium_floor!=null?`<div class="ec-m"><div class="ec-ml">Premium</div><div class="ec-prem ${r.opponent_premium_floor>0?'pos':r.opponent_premium_floor<0?'neg':'neu'}">${r.opponent_premium_floor>=0?'+':''}$${Math.abs(r.opponent_premium_floor)}</div></div>`:''}
+        <div class="ec-m"><div class="ec-ml">Last seen</div><div class="ec-mv" style="font-size:10px;">${(r.last_event_date||'—').substring(0,10)}</div></div>
+      </div>${expCB(r.days_out_curve)}${expDB(r.by_day_of_week)}
+    </div>`).join('');
+  }else if(type==='venue'){
+    const vb=results.venue_baselines||[],ht=results.home_teams||[],tm=results.top_matchups||[];
+    if(st)st.textContent=vb.length+' baselines · '+ht.length+' home teams · '+tm.length+' matchups';
+    if(!res)return;
+    let html='';
+    if(vb.length){html+=expSec('📊 Category Baselines');html+=vb.map(r=>`<div class="exp-card"><div class="ec-title">${r.category||'General'}</div><div class="ec-sub">${r.samples} snapshots</div><div class="ec-metrics"><div class="ec-m"><div class="ec-ml">Floor avg</div><div class="ec-mv">${fmt(r.floor_avg)}</div></div><div class="ec-m"><div class="ec-ml">Avg avg</div><div class="ec-mv">${fmt(r.avg_avg)}</div></div></div>${expDB(r.by_day_of_week)}</div>`).join('');}
+    if(ht.length){html+=expSec('🏠 Home Teams');html+=ht.map(r=>`<div class="exp-card"><div class="ec-title">${r.home_performer}</div><div class="ec-sub">${r.category} · ${r.samples} games</div><div class="ec-metrics"><div class="ec-m"><div class="ec-ml">Home floor avg</div><div class="ec-mv">${fmt(r.floor_avg)}</div></div></div>${expDB(r.by_day_of_week)}</div>`).join('');}
+    if(tm.length){html+=expSec('⚔️ Top Matchups');html+=tm.map(r=>expMMCard(r.home_performer,r.away_performer,'',r.opponent_premium_floor,null,r.samples,{})).join('');}
+    if(!html)html=expEmpty('No venue data','Collect snapshots and run baselineUpdateTrigger()');
+    res.innerHTML=html;
+  }else if(type==='matchup'){
+    const cnt=Array.isArray(results)?results.length:0;
+    if(st)st.textContent=cnt+' matchup'+(cnt===1?'':'s');
+    if(!res||!cnt){if(res)res.innerHTML=expEmpty('No matchup data','Track events with same teams at same venue');return;}
+    res.innerHTML=results.map(r=>expMMCard(r.home_performer,r.away_performer,r.venue,r.opponent_premium_floor,r.opponent_premium_pct,r.samples,r.days_out_curve,r.by_day_of_week,r.by_season_type)).join('');
+  }
+}
+function expMMCard(home,away,venue,prem,premPct,samples,curve,dow,szn){
+  const p=prem!=null?Math.round(prem):null;
+  const cls=p==null?'neu':p>20?'pos':p<-20?'neg':'neu';
+  const sign=p!=null&&p>=0?'+':'';
+  return `<div class="exp-card"><div class="ec-title">${home||'?'} vs ${away||'?'}</div><div class="ec-sub">${venue||''} · ${samples} sample${samples===1?'':'s'}</div><div class="ec-metrics">${p!=null?`<div class="ec-m"><div class="ec-ml">Visitor premium</div><div class="ec-prem ${cls}">${sign}$${Math.abs(p)}${premPct!=null?' ('+sign+premPct+'%)':''}</div></div>`:''}</div>${expCB(curve||{})}${expDB(dow||{})}${expSZ(szn||{})}</div>`;
+}
+function expCB(curve){
+  if(!curve||!Object.keys(curve).length)return '';
+  const BKT=['d14','d7','d3','d1','d0'],LBLS=['14d','7d','3d','1d','0d'];
+  const vals=BKT.map(k=>curve[k]?.floor_avg||0),mx=Math.max(...vals,1);
+  const bars=BKT.map((k,i)=>{const v=curve[k]?.floor_avg||0,n=curve[k]?.samples||0;
+    const h=Math.max(3,Math.round(v/mx*24));
+    return '<div style="flex:1;height:'+h+'px;background:var(--teal);opacity:'+(n?.7:.15)+';border-radius:1px 1px 0 0;" title="'+LBLS[i]+': '+(v?fmt(v):'—')+(n?' ('+n+'x)':'')+'"></div>';
+  }).join('');
+  const lbls=LBLS.map(l=>'<span style="flex:1;text-align:center;font-size:8px;color:var(--muted);">'+l+'</span>').join('');
+  return '<div style="margin-top:4px;"><div style="font-size:9px;color:var(--muted);margin-bottom:2px;">DAYS-OUT CURVE</div><div style="display:flex;gap:2px;align-items:flex-end;height:24px;">'+bars+'</div><div style="display:flex;gap:2px;">'+lbls+'</div></div>';
+}
+function expDB(dow){
+  if(!dow||!Object.keys(dow).length)return '';
+  const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],FULL=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  const vals=FULL.map(d=>dow[d]?.floor_avg||0),mx=Math.max(...vals,1);
+  const bars=FULL.map((d,i)=>{const v=dow[d]?.floor_avg||0,n=dow[d]?.samples||0;
+    const h=Math.max(2,Math.round(v/mx*18));
+    return '<div title="'+DAYS[i]+': '+(v?fmt(v):'—')+'" style="flex:1;height:'+h+'px;background:var(--green);opacity:'+(n?.65:.12)+';border-radius:1px 1px 0 0;"></div>';
+  }).join('');
+  return '<div style="margin-top:4px;"><div style="font-size:9px;color:var(--muted);margin-bottom:2px;">BY DAY OF WEEK</div><div style="display:flex;gap:2px;align-items:flex-end;height:18px;">'+bars+'</div><div style="display:flex;gap:2px;">'+DAYS.map(d=>'<span style="flex:1;text-align:center;font-size:8px;color:var(--muted);">'+d+'</span>').join('')+'</div></div>';
+}
+function expSZ(szn){
+  if(!szn||!Object.keys(szn).length)return '';
+  const items=Object.entries(szn).filter(([,v])=>v.samples>0)
+    .map(([k,v])=>'<span style="font-size:9px;padding:1px 6px;border-radius:3px;background:var(--bg);color:var(--muted);">'+k+': '+fmt(v.floor_avg)+' ('+v.samples+')</span>');
+  return items.length?'<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;">'+items.join('')+'</div>':'';
+}
+function expSec(title){return '<div style="grid-column:1/-1;font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.08em;padding:4px 0 2px;border-bottom:1px solid var(--border);margin-top:4px;">'+title+'</div>';}
+function expEmpty(title,sub){return '<div style="grid-column:1/-1;padding:60px 20px;text-align:center;"><div style="font-size:28px;margin-bottom:10px;">📊</div><div style="font-size:13px;color:var(--text2);">'+title+'</div><div style="font-size:11px;color:var(--muted);margin-top:6px;">'+sub+'</div></div>';}
 
 // ── Init ────────────────────────────────────────────────────────
 async function init() {

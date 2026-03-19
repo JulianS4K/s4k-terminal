@@ -444,7 +444,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   <div class="topbar-right">
     <span id="st-bar"></span>
     <span id="clock"></span>
-    <span class="ver-pill" id="ver-badge">alpha 2.5</span>
+    <span class="ver-pill" id="ver-badge">Alpha 2.0</span>
   </div>
 </div>
 
@@ -906,13 +906,13 @@ const CKEY = 's4k_a30';
 //            4-tier cadence, auto-update dual-layer, Matched ★ tab
 // Alpha 3.1  Composite index query, orderBy server-side, limit 500,
 //            poll last_updated fallback, SSE parking sanity filter
-// alpha 2.5  DbClient · fsBatchWrite · SQL flat schema · zone foundation · F5 Explorer
+// Alpha 2.0  DbClient · fsBatchWrite · SQL flat schema · zone foundation · F5 Explorer
 // Alpha 3.3  Schema v3: flat tevo/ docs, unified feed_items, price_slots map
 // Alpha 3.2  Remove manual refresh → auto-update timer, SSE filter,
 //            chart debounce, token cache, session error state,
 //            sanity filter tightened, blank feed card fix, ET timezone
 // ================================================================
-const APP_VERSION = 'alpha 2.5';
+const APP_VERSION = 'Alpha 2.0';
 
 // Migrate GAS URL from previous versions
 (function migrate() {
@@ -3246,8 +3246,9 @@ let aggMode   = {perf:'price', venue:'price'};
 function refreshAggPanels() {
   const perfPanel  = document.getElementById('panel-performer');
   const venuePanel = document.getElementById('panel-venue');
-  if (perfPanel  && perfPanel.classList.contains('active'))  loadAggPanel('perf');
-  if (venuePanel && venuePanel.classList.contains('active')) loadAggPanel('venue');
+  // Only refresh if the panel is active AND a selection has been made
+  if (perfPanel  && perfPanel.classList.contains('active')  && selPerfId)  loadAggPanel('perf');
+  if (venuePanel && venuePanel.classList.contains('active') && selVenueId) loadAggPanel('venue');
 }
 
 // Ensure an event is selected before loading agg panel
@@ -3277,12 +3278,22 @@ function switchAggMode(mode, prefix, el) {
 }
 
 function buildAggData(prefix) {
-  if (!selKey || !tracked[selKey]) return null;
-  const sel = tracked[selKey];
-  const matchKey  = prefix==='perf' ? 'performer_id' : 'venue_id';
-  const matchVal  = prefix==='perf' ? sel.performer_id : sel.venue_id;
-  const matchName = prefix==='perf' ? (sel.performer||'') : (sel.venue||'');
-  console.log('[buildAggData]', prefix, '— matchKey:', matchKey, 'matchVal:', matchVal, 'matchName:', matchName, 'event:', sel.name);
+  // Use selPerfId/selVenueId directly — independent of which event is selKey
+  const matchKey = prefix==='perf' ? 'performer_id' : 'venue_id';
+  const directId = prefix==='perf' ? selPerfId : selVenueId;
+
+  // If no direct selection, fall back to selKey's performer/venue
+  let matchVal  = directId || '';
+  let matchName = '';
+  if (!matchVal && selKey && tracked[selKey]) {
+    const sel = tracked[selKey];
+    matchVal  = prefix==='perf' ? (sel.performer_id||'') : (sel.venue_id||'');
+    matchName = prefix==='perf' ? (sel.performer||'')    : (sel.venue||'');
+  } else if (matchVal) {
+    // Find name from any tracked event with this id
+    const ev = Object.values(tracked).find(e => String(e[matchKey]||'')=== String(matchVal));
+    matchName = ev ? (prefix==='perf' ? (ev.performer||'') : (ev.venue||'')) : '';
+  }
 
   // Match by ID first, fall back to name if ID empty
   let relEvents = [];
@@ -3336,10 +3347,17 @@ function buildAggData(prefix) {
 
 async function loadAggPanel(prefix) {
   if (!selKey || !tracked[selKey]) return;
-  const sel    = tracked[selKey];
-  const isPerf = prefix==='perf';
-  const label  = isPerf ? (sel.performer||sel.name||'—') : (sel.venue||'—');
-  const sub    = sel.venue_city||'';
+  const isPerf  = prefix==='perf';
+  const directId = isPerf ? selPerfId : selVenueId;
+  // Find a representative event for this performer/venue
+  const matchKey2 = isPerf ? 'performer_id' : 'venue_id';
+  const repEv = directId
+    ? Object.values(tracked).find(e => String(e[matchKey2]||'')=== String(directId))
+    : (selKey ? tracked[selKey] : null);
+  const label = isPerf
+    ? (repEv?.performer || '—')
+    : (repEv?.venue || '—');
+  const sub = repEv?.venue_city || '';
 
   const titleEl = document.getElementById(prefix+'-title');
   const subEl   = document.getElementById(prefix+'-sub');
@@ -3400,16 +3418,11 @@ async function loadAggPanel(prefix) {
 }
 
 async function loadAggIndex(prefix) {
-  if (!selKey || !tracked[selKey]) return null;
-  const sel = tracked[selKey];
   try {
-    if (prefix==='perf') {
-      const id = sel.performer_id||''; if(!id) return null;
-      return await FS.getDoc('performer_index', String(id));
-    } else {
-      const id = sel.venue_id||''; if(!id) return null;
-      return await FS.getDoc('venue_index', String(id));
-    }
+    const id = prefix==='perf' ? selPerfId : selVenueId;
+    if (!id) return null;
+    const coll = prefix==='perf' ? 'performer_index' : 'venue_index';
+    return await FS.getDoc(coll, String(id));
   } catch(e) { return null; }
 }
 

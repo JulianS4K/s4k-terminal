@@ -1032,14 +1032,37 @@ const FS = (() => {
     return doc;
   }
 
+  // ── Rate limiter — max 8 concurrent Firestore requests ──────────
+  // Blaze still 429s on burst. This queues requests to stay under limit.
+  let _activeReqs = 0;
+  const _MAX_CONCURRENT = 8;
+  const _reqQueue = [];
+  function _throttle(fn) {
+    return new Promise((resolve, reject) => {
+      const run = async () => {
+        _activeReqs++;
+        try { resolve(await fn()); }
+        catch(e) { reject(e); }
+        finally {
+          _activeReqs--;
+          if (_reqQueue.length) _reqQueue.shift()();
+        }
+      };
+      if (_activeReqs < _MAX_CONCURRENT) run();
+      else _reqQueue.push(run);
+    });
+  }
+
   // ── GET single document ────────────────────────────────────────
   async function getDoc(collection, docId) {
+    return _throttle(async () => {
     const token = await getToken();
     const url   = `${baseUrl()}/${collection}/${encodeURIComponent(docId)}`;
     const r = await fetch(url, {headers:{Authorization:`Bearer ${token}`}});
     if (r.status === 404) return null;
     if (!r.ok) throw new Error(`Firestore GET ${collection}/${docId}: HTTP ${r.status}`);
     return decodeDoc(await r.json());
+    }); // end _throttle
   }
 
   // ── Structured query (POST :runQuery) ──────────────────────────
@@ -1192,7 +1215,9 @@ async function testFirestore() {
   try {
     const result = await FS.testConnection();
     if (result.ok) {
+      // Stagger reads — avoid simultaneous burst hitting rate limit
       const snaps = await FS.query('tevo',[],[{field:'snapshot_ts',dir:'DESCENDING'}],3);
+      await new Promise(r=>setTimeout(r,300));
       const feeds = await FS.query('feed_items',[],[{field:'received_ts',dir:'DESCENDING'}],3);
       box.className='conn-result ok';
       box.textContent=`Firestore connected · tevo/${snaps.length} recent · feed_items/${feeds.length} recent`;
@@ -2822,14 +2847,16 @@ async function init() {
 
   setSt('Connecting…');
 
-  // Parallel warmup: GAS ping + Firestore token
-  Promise.allSettled([gasGet({action:'ping'}).catch(()=>{}), FS.getToken().catch(()=>{})]);
+  // Pre-warm GAS (fire and forget — no await, just wakes the cold start)
+  gasGet({action:'ping'}).catch(()=>{});
+
+  // Get Firestore token first, then load tracked — sequential to avoid burst
+  try { await FS.getToken(); } catch(e) {}
 
   await loadTracked();
 
-  // Load feed silently in background — doesn't touch status bar or buttons
-  // Populates badge + event strip as soon as data arrives
-  loadFeed(true).catch(()=>{});
+  // Load feed after a short delay — avoids simultaneous burst with loadTracked
+  setTimeout(() => loadFeed(true).catch(()=>{}), 2000);
 
   // Auto-refresh feed every 15 minutes (matches GAS espnPollTrigger cadence)
   setInterval(() => loadFeed(true).catch(()=>{}), 15 * 60 * 1000);

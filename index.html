@@ -1448,7 +1448,7 @@ async function loadHistory(key) {
           };
         })
         .filter(s => s.floor>0 && s.avg>0)
-        .map(s => ({...s, max: s.max>s.floor*20 ? s.avg*3 : s.max}))
+        .map(s => s)  // no max cap — courtside/suites are real listings
         .sort((a,b) => a.ts.localeCompare(b.ts));
       // Only trust Firestore result if it contains valid priced snapshots.
       // Old broken docs (0:"3" format) map to floor=0 and filter out.
@@ -1495,7 +1495,7 @@ async function loadHistory(key) {
           };
         })
         .filter(s => s.floor>0 && s.avg>0)
-        .map(s => ({...s, max: s.max>s.floor*20 ? s.avg*3 : s.max}))
+        .map(s => s)  // no max cap — courtside/suites are real listings
         .sort((a,b) => a.ts.localeCompare(b.ts));
       // Only overwrite if GAS returned real data — never wipe good in-memory points
       if (gasRows.length > 0) {
@@ -2609,7 +2609,7 @@ async function listenToTevo(token,pid) {
           if((ev.history||[]).some(h=>h.ts===np.ts)) continue;
           // Sanity: floor < avg/8 means parking leaked through (e.g. $16/$407)
           if(np.floor < 20) continue; // hard minimum — no real ticket < $20
-          if(np.avg > 50 && np.floor < np.avg / 6) continue; // parking leak
+          if(np.avg > 50 && np.floor < np.avg / 15) continue; // parking leak (loose — NBA avg skewed by courtside)
           if(!ev.history) ev.history=[];
           ev.history.push(np);
           ev.history.sort((a,b)=>a.ts.localeCompare(b.ts));

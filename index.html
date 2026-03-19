@@ -444,32 +444,32 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   <div class="topbar-right">
     <span id="st-bar"></span>
     <span id="clock"></span>
-    <span class="ver-pill" id="ver-badge">Alpha 2.0</span>
+    <span class="ver-pill" id="ver-badge">alpha 2.5</span>
   </div>
 </div>
 
 <!-- ── Nav ── -->
 <div class="nav">
-  <div class="tab active" onclick="showPanel('portfolio',this)" id="tab-portfolio">
+  <div class="tab active" onclick="showPanel('portfolio',this);setSidebarMode('events')" id="tab-portfolio">
     <span class="fk">F1</span>Portfolio
   </div>
-  <div class="tab" onclick="showPanel('search',this)" id="tab-search">
+  <div class="tab" onclick="showPanel('search',this);setSidebarMode('events')" id="tab-search">
     <span class="fk">F2</span>Search
   </div>
   <div class="tab" onclick="showPanel('explore',this);initExplorer();" id="tab-explore">
     F5 <span class="tab-label">Explore</span>
   </div>
-  <div class="tab" onclick="showPanel('feed',this);setLF('matched',document.getElementById('pill-matched'));if(!feedItems.length||(Date.now()-lastFeedLoad>5*60*1000))loadFeed();" id="tab-feed">
+  <div class="tab" onclick="showPanel('feed',this);setSidebarMode('events');setLF('matched',document.getElementById('pill-matched'));if(!feedItems.length||(Date.now()-lastFeedLoad>5*60*1000))loadFeed();" id="tab-feed">
     <span class="fk">F3</span>Feed
     <span class="tab-badge" id="feed-badge" style="display:none;">0</span>
   </div>
-  <div class="tab" onclick="showPanel('settings',this)" id="tab-settings">
+  <div class="tab" onclick="showPanel('settings',this);setSidebarMode('events')" id="tab-settings">
     <span class="fk">F4</span>Settings
   </div>
-  <div class="tab" onclick="showPanel('performer',this);ensureSelAndLoad('perf')" id="tab-performer">
+  <div class="tab" onclick="showAggPanel('performer','perf',this)" id="tab-performer">
     <span class="fk">F6</span>Performer
   </div>
-  <div class="tab" onclick="showPanel('venue',this);ensureSelAndLoad('venue')" id="tab-venue">
+  <div class="tab" onclick="showAggPanel('venue','venue',this)" id="tab-venue">
     <span class="fk">F7</span>Venue
   </div>
   <div class="nav-right">
@@ -480,14 +480,33 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 <!-- ── Main ── -->
 <div class="main">
 
-  <!-- ── Sidebar ── -->
-  <div class="sidebar">
-    <div class="sb-head">
-      <span class="sb-title">Tracked Events</span>
-      <span class="sb-meta" id="tcount">0</span>
+  <!-- ── Sidebar — context-aware (events / performers / venues) ── -->
+  <div class="sidebar" id="main-sidebar">
+    <!-- Events sidebar (F1/F2/F3/F4/F5) -->
+    <div id="sb-events" style="display:flex;flex-direction:column;height:100%;">
+      <div class="sb-head">
+        <span class="sb-title">Tracked Events</span>
+        <span class="sb-meta" id="tcount">0</span>
+      </div>
+      <div class="sb-list" id="sb-list">
+        <div class="sb-empty">No events tracked.<br>Use <strong>F2 Search</strong> to find and track events.</div>
+      </div>
     </div>
-    <div class="sb-list" id="sb-list">
-      <div class="sb-empty">No events tracked.<br>Use <strong>F2 Search</strong> to find and track events.</div>
+    <!-- Performer sidebar (F6) -->
+    <div id="sb-performers" style="display:none;flex-direction:column;height:100%;">
+      <div class="sb-head">
+        <span class="sb-title">Performers</span>
+        <span class="sb-meta" id="perf-count">0</span>
+      </div>
+      <div class="sb-list" id="sb-perf-list"></div>
+    </div>
+    <!-- Venue sidebar (F7) -->
+    <div id="sb-venues" style="display:none;flex-direction:column;height:100%;">
+      <div class="sb-head">
+        <span class="sb-title">Venues</span>
+        <span class="sb-meta" id="venue-count">0</span>
+      </div>
+      <div class="sb-list" id="sb-venue-list"></div>
     </div>
   </div>
 
@@ -887,13 +906,13 @@ const CKEY = 's4k_a30';
 //            4-tier cadence, auto-update dual-layer, Matched ★ tab
 // Alpha 3.1  Composite index query, orderBy server-side, limit 500,
 //            poll last_updated fallback, SSE parking sanity filter
-// Alpha 2.0  DbClient · fsBatchWrite · SQL flat schema · zone foundation · F5 Explorer
+// alpha 2.5  DbClient · fsBatchWrite · SQL flat schema · zone foundation · F5 Explorer
 // Alpha 3.3  Schema v3: flat tevo/ docs, unified feed_items, price_slots map
 // Alpha 3.2  Remove manual refresh → auto-update timer, SSE filter,
 //            chart debounce, token cache, session error state,
 //            sanity filter tightened, blank feed card fix, ET timezone
 // ================================================================
-const APP_VERSION = 'Alpha 2.0';
+const APP_VERSION = 'alpha 2.5';
 
 // Migrate GAS URL from previous versions
 (function migrate() {
@@ -3489,6 +3508,92 @@ function renderAggNews(prefix, data) {
       </div>
     </div>`;
   }).join('');
+}
+
+// ── Sidebar mode switching ────────────────────────────────────────
+let selPerfId   = null; // currently selected performer
+let selVenueId  = null; // currently selected venue
+
+function setSidebarMode(mode) {
+  const evSb   = document.getElementById('sb-events');
+  const perfSb = document.getElementById('sb-performers');
+  const venSb  = document.getElementById('sb-venues');
+  if (evSb)   evSb.style.display   = mode==='events'    ? 'flex' : 'none';
+  if (perfSb) perfSb.style.display = mode==='performer' ? 'flex' : 'none';
+  if (venSb)  venSb.style.display  = mode==='venue'     ? 'flex' : 'none';
+}
+
+function showAggPanel(panelId, prefix, tabEl) {
+  showPanel(panelId, tabEl);
+  setSidebarMode(panelId); // 'performer' or 'venue'
+  buildAggSidebar(prefix);
+}
+
+function buildAggSidebar(prefix) {
+  const isPerf = prefix === 'perf';
+  const listEl = document.getElementById(isPerf ? 'sb-perf-list' : 'sb-venue-list');
+  const countEl= document.getElementById(isPerf ? 'perf-count'   : 'venue-count');
+  if (!listEl) return;
+
+  // Extract unique performers or venues from tracked events
+  const map = {}; // id → {id, name, city, events:[]}
+  Object.values(tracked).forEach(ev => {
+    const id   = isPerf ? ev.performer_id : ev.venue_id;
+    const name = isPerf ? ev.performer    : ev.venue;
+    const city = ev.venue_city || '';
+    if (!id || !name) return;
+    if (!map[id]) map[id] = {id, name, city, events:[], latest_floor:0};
+    map[id].events.push(ev);
+    // Track latest floor for display
+    const h = (ev.history||[]).filter(s=>s.floor>0);
+    if (h.length) {
+      const f = h[h.length-1].floor;
+      if (f > map[id].latest_floor) map[id].latest_floor = f;
+    }
+  });
+
+  const items = Object.values(map).sort((a,b)=>a.name.localeCompare(b.name));
+  if (countEl) countEl.textContent = items.length;
+
+  if (!items.length) {
+    listEl.innerHTML = '<div class="sb-empty">No tracked events yet.</div>';
+    return;
+  }
+
+  const selId = isPerf ? selPerfId : selVenueId;
+
+  listEl.innerHTML = items.map(item => {
+    const isActive = String(item.id) === String(selId||'');
+    const evCount  = item.events.length;
+    const floorStr = item.latest_floor > 0 ? `<span style="font-family:var(--font);font-size:13px;font-weight:600;color:var(--teal);">${fmt(item.latest_floor)}</span>` : '';
+    return `<div class="ev-card${isActive?' active':''}" onclick="selectAggItem('${prefix}','${item.id}','${item.name.replace(/'/g,"\'")}')">
+      <div class="ev-name" title="${item.name}">${item.name}</div>
+      <div class="ev-venue">${item.city}</div>
+      <div class="ev-row2">
+        ${floorStr}
+        <span class="ev-snaps">${evCount} event${evCount!==1?'s':''}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function selectAggItem(prefix, id, name) {
+  const isPerf = prefix === 'perf';
+  if (isPerf) selPerfId  = id;
+  else        selVenueId = id;
+
+  // Find a tracked event with this performer/venue to set as selKey context
+  const matchKey = isPerf ? 'performer_id' : 'venue_id';
+  const matchEv  = Object.entries(tracked).find(([k,ev]) =>
+    String(ev[matchKey]||'') === String(id)
+  );
+  if (matchEv) selKey = matchEv[0];
+
+  // Rebuild sidebar to show active state
+  buildAggSidebar(prefix);
+
+  // Load the aggregate panel
+  loadAggPanel(prefix);
 }
 
 window.addEventListener('load', init);

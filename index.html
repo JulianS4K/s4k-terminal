@@ -36,6 +36,10 @@
   --sg:var(--blue);--sg-dim:var(--blue-dim);
   --rss:var(--orange);--amber:var(--yellow);--amber2:var(--orange);
   --cyan:var(--teal);
+  /* Chart line palette — 12 distinct colors */
+  --c-te-floor:#24C1E0;   --c-te-med:#A142F4;  --c-te-avg:#FBBC04;  --c-te-max:#EA4335;
+  --c-sg-floor:#4285F4;   --c-sg-med:#7BAAF7;  --c-sg-avg:#3367D6;  --c-sg-max:#174EA6;
+  --c-ow-floor:#34A853;   --c-ow-med:#81C995;  --c-ow-avg:#1E8E3E;  --c-ow-max:#0D652D;
   --shadow:0 4px 16px rgba(0,0,0,0.5);
 }
 html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--ui);font-size:13px;-webkit-font-smoothing:antialiased;}
@@ -196,10 +200,16 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 .c-tog{font-size:11px;font-weight:500;padding:4px 12px;border-radius:var(--r3);
   cursor:pointer;color:var(--muted);background:rgba(255,255,255,0.04);
   border:1px solid var(--border);transition:all 0.15s;}
-.c-tog.on-f{background:var(--teal-dim);color:var(--teal);border-color:rgba(36,193,224,0.3);}
-.c-tog.on-a{background:var(--yellow-dim);color:var(--yellow);border-color:rgba(251,188,4,0.3);}
-.c-tog.on-m{background:var(--purple-dim);color:var(--purple);border-color:rgba(161,66,244,0.3);}
-.c-tog.on-x{background:var(--red-dim);color:var(--red);border-color:rgba(234,67,53,0.3);}
+.c-tog.on-f {background:rgba(36,193,224,.12);color:#24C1E0;border-color:rgba(36,193,224,.3);}
+.c-tog.on-a {background:rgba(251,188,4,.12);color:#FBBC04;border-color:rgba(251,188,4,.3);}
+.c-tog.on-m {background:rgba(161,66,244,.12);color:#A142F4;border-color:rgba(161,66,244,.3);}
+.c-tog.on-x {background:rgba(234,67,53,.12);color:#EA4335;border-color:rgba(234,67,53,.3);}
+.c-tog.on-sgf{background:rgba(66,133,244,.15);color:#4285F4;border-color:rgba(66,133,244,.4);}
+.c-tog.on-sga{background:rgba(51,103,214,.15);color:#7BAAF7;border-color:rgba(51,103,214,.4);}
+.c-tog.on-owf{background:rgba(52,168,83,.15);color:#34A853;border-color:rgba(52,168,83,.4);}
+.c-tog.on-owa{background:rgba(30,142,62,.15);color:#81C995;border-color:rgba(30,142,62,.4);}
+.tog-group{display:flex;gap:3px;align-items:center;padding:0 6px;border-left:1px solid var(--border);}
+.tog-group-lbl{font-size:9px;color:var(--muted);margin-right:2px;text-transform:uppercase;letter-spacing:.06em;}
 #c-lbl{font-size:11px;color:var(--muted);margin-left:auto;font-family:var(--body);}
 .chart-canvas-wrap{position:relative;flex:1;min-height:0;}
 #main-ch{display:block;width:100%;height:100%;}
@@ -631,11 +641,24 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
         <div class="chart-controls">
           <div class="c-tab active" onclick="switchMode('price',this)">Price</div>
           <div class="c-tab" onclick="switchMode('count',this)">Listings</div>
-          <div class="c-toggles" id="c-toggles">
-            <div class="c-tog on-f" onclick="togS('floor',this)" id="tog-f">Floor</div>
-            <div class="c-tog" onclick="togS('med',this)" id="tog-m">Median</div>
-            <div class="c-tog" onclick="togS('avg',this)" id="tog-a">Avg</div>
-            <div class="c-tog" onclick="togS('max',this)" id="tog-x">Max</div>
+          <div class="c-toggles" id="c-toggles" style="display:flex;gap:0;flex-wrap:wrap;">
+            <div class="tog-group">
+              <span class="tog-group-lbl" style="color:var(--teal);">TE</span>
+              <div class="c-tog on-f" onclick="togS('floor',this)" id="tog-f">F</div>
+              <div class="c-tog" onclick="togS('med',this)" id="tog-m">M</div>
+              <div class="c-tog" onclick="togS('avg',this)" id="tog-a">A</div>
+              <div class="c-tog" onclick="togS('max',this)" id="tog-x">X</div>
+            </div>
+            <div class="tog-group">
+              <span class="tog-group-lbl" style="color:#4285F4;">SG</span>
+              <div class="c-tog" onclick="togS('sgfloor',this)" id="tog-sgf">F</div>
+              <div class="c-tog" onclick="togS('sgavg',this)" id="tog-sga">A</div>
+            </div>
+            <div class="tog-group">
+              <span class="tog-group-lbl" style="color:#34A853;">OWN</span>
+              <div class="c-tog" onclick="togS('owfloor',this)" id="tog-owf">F</div>
+              <div class="c-tog" onclick="togS('owavg',this)" id="tog-owa">A</div>
+            </div>
           </div>
           <!-- Data window filter -->
           <div style="display:flex;gap:3px;margin-left:8px;" id="window-tabs">
@@ -873,7 +896,7 @@ const APP_VERSION = 'Alpha 2.0';
 
 let tracked = {}, selKey = null;
 let chart = null, cmode = 'price';
-let son = {floor:true, med:false, avg:false, max:false};
+let son = {floor:true, med:false, avg:false, max:false, sgfloor:false, sgavg:false, owfloor:false, owavg:false};
 let chartWindow = '24h'; // active data window
 let xFeedItems = [], espnFeedItems = [], feedItems = [], lastFeedLoad = 0;
 let eventFeedMap = {};
@@ -1862,13 +1885,10 @@ function updateTotal() {
 // ── Chart ───────────────────────────────────────────────────────
 function togS(s,el) {
   son[s]=!son[s];
-  const map={floor:'f',med:'m',avg:'a',max:'x'};
-  const tog=document.getElementById('tog-'+map[s]);
-  if(tog) tog.className='c-tog'+(son[s]?' on-'+map[s]:'');
+  const classMap={floor:'f',med:'m',avg:'a',max:'x',sgfloor:'sgf',sgavg:'sga',owfloor:'owf',owavg:'owa'};
+  const tog=document.getElementById('tog-'+classMap[s]);
+  if(tog) tog.className='c-tog'+(son[s]?' on-'+classMap[s]:'');
   if(selKey&&cmode==='price') renderChart(tracked[selKey]);
-  const active=Object.keys(son).filter(k=>son[k]).map(k=>k.toUpperCase());
-  const lbl=document.getElementById('c-lbl');
-  if(lbl) lbl.textContent=(active.length?active.join(' · '):'(select series)')+' — per snapshot';
 }
 
 function setWindow(w, el) {
@@ -1988,10 +2008,47 @@ function _renderChartNow(r) {
     base.plugins.tooltip.callbacks.label=ctx=>` ${ctx.dataset.label}: $${Number(ctx.parsed.y).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
     const pr=singlePoint?8:4;
     const ds=[];
-    if(son.floor) ds.push({label:'FLOOR',data:h.map(s=>s.floor),borderColor:'#24C1E0',backgroundColor:'rgba(36,193,224,0.06)',tension:0.3,pointRadius:pr,fill:true,borderWidth:1.5,spanGaps:true});
-    if(son.med)   ds.push({label:'MEDIAN',data:h.map(s=>s.median),borderColor:'#A142F4',backgroundColor:'rgba(161,66,244,0.05)',tension:0.3,pointRadius:pr,fill:!son.floor,borderWidth:2,spanGaps:true});
-    if(son.avg)   ds.push({label:'AVG',data:h.map(s=>s.avg),borderColor:'#FBBC04',tension:0.3,pointRadius:singlePoint?8:3,fill:false,borderWidth:1.5,borderDash:singlePoint?[]:[4,3],spanGaps:true});
-    if(son.max)   ds.push({label:'MAX',data:h.map(s=>s.max),borderColor:'#EA4335',tension:0.3,pointRadius:singlePoint?8:3,fill:false,borderWidth:1,borderDash:singlePoint?[]:[2,4],spanGaps:true});
+    // ── TEvo market lines ──────────────────────────────────────────
+    if(son.floor) ds.push({label:'TE Floor',data:h.map(s=>s.floor),borderColor:'#24C1E0',backgroundColor:'rgba(36,193,224,0.06)',tension:0.3,pointRadius:pr,fill:true,borderWidth:1.5,spanGaps:true});
+    if(son.med)   ds.push({label:'TE Median',data:h.map(s=>s.median),borderColor:'#A142F4',backgroundColor:'rgba(161,66,244,0.04)',tension:0.3,pointRadius:pr,fill:false,borderWidth:1.5,borderDash:[5,3],spanGaps:true});
+    if(son.avg)   ds.push({label:'TE Avg',data:h.map(s=>s.avg),borderColor:'#FBBC04',tension:0.3,pointRadius:singlePoint?8:3,fill:false,borderWidth:1.5,borderDash:singlePoint?[]:[4,3],spanGaps:true});
+    if(son.max)   ds.push({label:'TE Max',data:h.map(s=>s.max),borderColor:'#EA4335',tension:0.3,pointRadius:singlePoint?8:3,fill:false,borderWidth:1,borderDash:singlePoint?[]:[2,4],spanGaps:true});
+    // ── SeatGeek lines — read sg history from seatgeek/ snapshots ──
+    const sgH = filterByWindow((r.sgHistory||[]).filter(s=>s.floor>0));
+    if(son.sgfloor && sgH.length) {
+      // Align SG timestamps to chart labels by nearest match
+      const sgData = h.map(snap => {
+        if (!sgH.length) return null;
+        const snapT = new Date(snap.ts).getTime();
+        const nearest = sgH.reduce((a,b) => Math.abs(new Date(b.ts)-snapT) < Math.abs(new Date(a.ts)-snapT) ? b : a);
+        return Math.abs(new Date(nearest.ts)-snapT) < 2*3600*1000 ? nearest.floor : null;
+      });
+      ds.push({label:'SG Floor',data:sgData,borderColor:'#4285F4',backgroundColor:'rgba(66,133,244,0.05)',tension:0.3,pointRadius:3,fill:false,borderWidth:2,borderDash:[6,2],spanGaps:true});
+    }
+    if(son.sgavg && sgH.length) {
+      const sgData = h.map(snap => {
+        const snapT = new Date(snap.ts).getTime();
+        const nearest = sgH.reduce((a,b) => Math.abs(new Date(b.ts)-snapT) < Math.abs(new Date(a.ts)-snapT) ? b : a);
+        return Math.abs(new Date(nearest.ts)-snapT) < 2*3600*1000 ? nearest.avg : null;
+      });
+      ds.push({label:'SG Avg',data:sgData,borderColor:'#7BAAF7',tension:0.3,pointRadius:3,fill:false,borderWidth:1.5,borderDash:[4,4],spanGaps:true});
+    }
+    // ── Owned lines — from TEvo owned stats in history ─────────────
+    const owH = filterByWindow((r.history||[]).filter(s=>s.owned&&s.owned.count>0&&s.owned.stats?.retail?.floor>0));
+    if(son.owfloor && owH.length) {
+      const owData = h.map(snap => {
+        const match = owH.find(o=>o.ts===snap.ts);
+        return match ? (match.owned.stats.retail.floor||null) : null;
+      });
+      ds.push({label:'Own Floor',data:owData,borderColor:'#34A853',backgroundColor:'rgba(52,168,83,0.05)',tension:0.3,pointRadius:4,pointStyle:'rect',fill:false,borderWidth:2,borderDash:[5,2],spanGaps:false});
+    }
+    if(son.owavg && owH.length) {
+      const owData = h.map(snap => {
+        const match = owH.find(o=>o.ts===snap.ts);
+        return match ? (match.owned.stats.retail.avg||null) : null;
+      });
+      ds.push({label:'Own Avg',data:owData,borderColor:'#81C995',tension:0.3,pointRadius:3,pointStyle:'rect',fill:false,borderWidth:1.5,borderDash:[3,4],spanGaps:false});
+    }
     if(feedMarkers.length) ds.push({
       label:'FEED',type:'scatter',showLine:false,order:0,
       data:h.map((_,i)=>{const hit=feedMarkers.find(m=>m.x===i);return hit?hit.y:null;}),
@@ -2833,10 +2890,9 @@ async function saveSGEventId() {
 }
 
 async function loadSGData(key) {
-  // Load SeatGeek data from event_index sg_ fields — zero extra Firestore reads
-  // event_index already has sg_floor/avg/median/max/count/deal_score from pollSeatGeek()
   const ev = tracked[key]; if (!ev || !ev.event_id) return;
   try {
+    // Load latest SG metrics from event_index (for the metrics row)
     const idx = await FS.getEventIndex(ev.event_id);
     if (idx && idx.sg_floor > 0) {
       tracked[key]._sg = {
@@ -2850,8 +2906,25 @@ async function loadSGData(key) {
         sg_snapshot_ts:idx.sg_snapshot_ts       || '',
         sg_event_id:   idx.sg_event_id          || ''
       };
-      if (selKey === key) renderDetail(key);
     }
+    // Load SG snapshot history for chart lines
+    const sgSnaps = await FS.query('seatgeek',
+      [{field:'event_id', op:'EQUAL', value:String(ev.event_id)}],
+      [], 500);
+    if (sgSnaps && sgSnaps.length > 0) {
+      tracked[key].sgHistory = sgSnaps
+        .map(s => ({
+          ts:     s.snapshot_ts || '',
+          floor:  Number(s.floor  || 0),
+          avg:    Number(s.avg    || 0),
+          median: Number(s.median || 0),
+          max:    Number(s.max    || 0),
+          count:  Number(s.count  || 0)
+        }))
+        .filter(s => s.floor > 0 && s.ts)
+        .sort((a,b) => a.ts.localeCompare(b.ts));
+    }
+    if (selKey === key) { renderDetail(key); renderChart(tracked[key]); }
   } catch(e) {}
 }
 

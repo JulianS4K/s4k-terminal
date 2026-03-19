@@ -2044,8 +2044,6 @@ function _renderChartNow(r) {
     if(son.med)   ds.push({label:'TE Median',data:h.map(s=>s.median),borderColor:'#A142F4',backgroundColor:'rgba(161,66,244,0.04)',tension:0.3,pointRadius:pr,fill:false,borderWidth:1.5,borderDash:[5,3],spanGaps:true});
     if(son.avg)   ds.push({label:'TE Avg',data:h.map(s=>s.avg),borderColor:'#FBBC04',tension:0.3,pointRadius:singlePoint?8:3,fill:false,borderWidth:1.5,borderDash:singlePoint?[]:[4,3],spanGaps:true});
     if(son.max)   ds.push({label:'TE Max',data:h.map(s=>s.max),borderColor:'#EA4335',tension:0.3,pointRadius:singlePoint?8:3,fill:false,borderWidth:1,borderDash:singlePoint?[]:[2,4],spanGaps:true});
-    // ── SeatGeek lines — read sg history from seatgeek/ snapshots ──
-    const sgH = filterByWindow((r.sgHistory||[]).filter(s=>s.floor>0));
     // ── SeatGeek lines ─────────────────────────────────────────────
     const sgH = filterByWindow((r.sgHistory||[]).filter(s=>s.floor>0));
     // Helper: align SG snapshot to nearest TEvo timestamp (within 2h)

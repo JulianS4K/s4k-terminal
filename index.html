@@ -1696,7 +1696,7 @@ async function selectEvent(key) {
 
   // Load history + markers in parallel
   await Promise.allSettled([loadHistory(key), loadEventFeedMarkers(key), loadIntelligence(key), loadSGData(key)]);
-  if (selKey===key) { renderDetail(key); renderChart(tracked[key]); setSt('Ready'); }
+  if (selKey===key) { renderDetail(key); renderChart(tracked[key]); setSt('Ready'); refreshAggPanels(); }
 }
 
 function renderDetail(key) {
@@ -2556,7 +2556,10 @@ function mergeAndMap(x,espn) {
   });
   eventFeedMap=map;
   // Refresh portfolio feed panel whenever feedItems updates
-  if(selKey && tracked[selKey]) renderPortfolioFeed(tracked[selKey]);
+  if(selKey && tracked[selKey]) {
+    renderPortfolioFeed(tracked[selKey]);
+    refreshAggPanels();
+  }
   return merged;
 }
 

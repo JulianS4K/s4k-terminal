@@ -584,7 +584,33 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
         <span id="snap-last"></span>
         <span id="live-badge">● LIVE</span>
       </div>
-    </div>
+
+      <!-- ══ VENUE INTELLIGENCE — inside portfolio panel only ══ -->
+      <div id="intel-panel" style="display:none;margin:8px 16px;padding:10px 14px;
+           background:var(--bg2);border:1px solid var(--border);border-radius:6px;font-size:11px;flex-shrink:0;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <span style="font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--muted);">VENUE INTELLIGENCE</span>
+          <span id="intel-matchup" style="color:var(--text2);font-size:10px;"></span>
+        </div>
+        <div id="intel-loading" style="color:var(--muted);font-style:italic;font-size:11px;">Loading…</div>
+        <div id="intel-body" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;"></div>
+        <div id="intel-curve" style="margin-top:8px;display:none;">
+          <div style="font-size:9px;color:var(--muted);margin-bottom:4px;">DAYS-OUT CURVE</div>
+          <div id="intel-curve-bars" style="display:flex;gap:3px;align-items:flex-end;height:32px;"></div>
+          <div id="intel-curve-labels" style="display:flex;gap:3px;margin-top:2px;font-size:9px;color:var(--muted);"></div>
+        </div>
+        <!-- Matched feed items — shown below curve when feed items exist -->
+        <div id="intel-feed" style="display:none;margin-top:8px;border-top:1px solid var(--border);padding-top:8px;">
+          <div style="font-size:9px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em;">MATCHED NEWS</div>
+          <div id="intel-feed-list" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto;"></div>
+        </div>
+      </div>
+      <!-- Section breakdown -->
+      <div id="section-strip" style="display:none;flex-wrap:wrap;gap:4px;padding:6px 16px;border-bottom:1px solid var(--border);flex-shrink:0;"></div>
+      <!-- Market signals -->
+      <div id="market-signals" style="display:none;flex-wrap:wrap;gap:4px;padding:4px 16px 6px;border-bottom:1px solid var(--border);flex-shrink:0;"></div>
+
+    </div><!-- /panel-portfolio -->
 
     <!-- F2: Search -->
     <div class="panel" id="panel-search">
@@ -680,26 +706,6 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
     </div>
 
     <!-- F4: Settings -->
-      <!-- ══ VENUE INTELLIGENCE ════════════════════════════════ -->
-      <div id="intel-panel" style="display:none;margin:0 0 8px;padding:10px 14px;
-           background:var(--card);border:1px solid var(--border);border-radius:6px;font-size:11px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-          <span style="font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--muted);">VENUE INTELLIGENCE</span>
-          <span id="intel-matchup" style="color:var(--text2);font-size:10px;"></span>
-        </div>
-        <div id="intel-loading" style="color:var(--muted);font-style:italic;font-size:11px;">Loading…</div>
-        <div id="intel-body" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;"></div>
-        <div id="intel-curve" style="margin-top:8px;display:none;">
-          <div style="font-size:9px;color:var(--muted);margin-bottom:4px;">DAYS-OUT CURVE</div>
-          <div id="intel-curve-bars" style="display:flex;gap:3px;align-items:flex-end;height:32px;"></div>
-          <div id="intel-curve-labels" style="display:flex;gap:3px;margin-top:2px;font-size:9px;color:var(--muted);"></div>
-        </div>
-      </div>
-      <!-- Section breakdown — top sections by ticket qty, row range in tooltip -->
-      <div id="section-strip" style="display:none;flex-wrap:wrap;gap:4px;padding:6px 14px;border-bottom:1px solid var(--border);"></div>
-      <!-- Market signals — in-hand%, singles%, dominant format -->
-      <div id="market-signals" style="display:none;flex-wrap:wrap;gap:4px;padding:4px 14px 6px;border-bottom:1px solid var(--border);"></div>
-
       <!-- ══ F5 EXPLORER ════════════════════════════════════════ -->
       <div class="panel" id="panel-explore">
         <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -2329,6 +2335,11 @@ function mergeAndMap(x,espn) {
     eids.forEach(id=>{if(!map[id])map[id]=[];map[id].push(item);});
   });
   eventFeedMap=map;
+  // Refresh intel panel feed items if an event is selected
+  if(selKey && tracked[selKey]) {
+    const cached = _intelCache[String(tracked[selKey].event_id)];
+    if(cached) renderIntelligence(cached, tracked[selKey]);
+  }
   return merged;
 }
 
@@ -2687,6 +2698,41 @@ function renderIntelligence(d,ev){
   const curve=d.matchup?.days_out_curve||d.venue_home?.days_out_curve;
   if(curve&&Object.keys(curve).length>=2&&curv){renderICurve(curve,ev);curv.style.display='block';}
   else if(curv) curv.style.display='none';
+
+  // ── Matched feed items below curve ───────────────────────────
+  // Show feed items matched to this event directly in the intel panel.
+  // Uses eventFeedMap built from feedItems — zero extra reads.
+  const intelFeed     = document.getElementById('intel-feed');
+  const intelFeedList = document.getElementById('intel-feed-list');
+  if(intelFeed && intelFeedList) {
+    const eid = String(ev.event_id||'');
+    const items = (eventFeedMap[eid]||[])
+      .filter(i => i.title && i.title.length > 5)
+      .sort((a,b) => new Date(b.pubDate||0) - new Date(a.pubDate||0))
+      .slice(0, 10);
+    if(items.length) {
+      intelFeedList.innerHTML = items.map(item => {
+        const icon   = item.srcType==='espn' ? '📺' : '🐦';
+        const ic     = item.impact==='High'?'var(--red)':item.impact==='Medium'?'var(--yellow)':'var(--muted)';
+        const handle = item.handle||item.author||'';
+        return `<div style="display:flex;gap:6px;padding:4px 0;border-bottom:1px solid var(--border);cursor:pointer;align-items:flex-start;"
+          onclick="${item.link?`window.open('${item.link.replace(/'/g,'')}')`:''}" >
+          <span style="font-size:11px;flex-shrink:0;">${icon}</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:11px;color:var(--white);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${item.title}</div>
+            <div style="font-size:10px;color:var(--muted);display:flex;gap:8px;margin-top:1px;">
+              ${item.impact?`<span style="color:${ic};">${item.impact}</span>`:''}
+              ${handle?`<span>${handle}</span>`:''}
+              <span>${ago(item.pubDate)}</span>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+      intelFeed.style.display='block';
+    } else {
+      intelFeed.style.display='none';
+    }
+  }
 }
 function iCard(lbl,val,sub,cls){
   return '<div class="intel-stat"><div class="il">'+lbl+'</div><div class="iv '+cls+'">'+val+'</div><div class="is">'+sub+'</div></div>';

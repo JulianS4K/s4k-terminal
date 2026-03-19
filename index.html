@@ -585,25 +585,14 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
         <span id="live-badge">● LIVE</span>
       </div>
 
-      <!-- ══ VENUE INTELLIGENCE — inside portfolio panel only ══ -->
-      <div id="intel-panel" style="display:none;margin:8px 16px;padding:10px 14px;
-           background:var(--bg2);border:1px solid var(--border);border-radius:6px;font-size:11px;flex-shrink:0;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-          <span style="font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--muted);">VENUE INTELLIGENCE</span>
-          <span id="intel-matchup" style="color:var(--text2);font-size:10px;"></span>
+      <!-- ══ RELATED FEED ITEMS — inside portfolio panel only ══ -->
+      <div id="intel-panel" style="display:none;margin:8px 16px 0;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex-shrink:0;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 12px;background:var(--bg2);border-bottom:1px solid var(--border);">
+          <span style="font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--muted);">RELATED NEWS</span>
+          <span id="intel-matchup" style="color:var(--muted);font-size:10px;"></span>
         </div>
-        <div id="intel-loading" style="color:var(--muted);font-style:italic;font-size:11px;">Loading…</div>
-        <div id="intel-body" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;"></div>
-        <div id="intel-curve" style="margin-top:8px;display:none;">
-          <div style="font-size:9px;color:var(--muted);margin-bottom:4px;">DAYS-OUT CURVE</div>
-          <div id="intel-curve-bars" style="display:flex;gap:3px;align-items:flex-end;height:32px;"></div>
-          <div id="intel-curve-labels" style="display:flex;gap:3px;margin-top:2px;font-size:9px;color:var(--muted);"></div>
-        </div>
-        <!-- Matched feed items — shown below curve when feed items exist -->
-        <div id="intel-feed" style="display:none;margin-top:8px;border-top:1px solid var(--border);padding-top:8px;">
-          <div style="font-size:9px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em;">MATCHED NEWS</div>
-          <div id="intel-feed-list" style="display:flex;flex-direction:column;gap:4px;max-height:160px;overflow-y:auto;"></div>
-        </div>
+        <div id="intel-feed-list" style="display:flex;flex-direction:column;max-height:180px;overflow-y:auto;"></div>
+        <div id="intel-loading" style="display:none;padding:10px 12px;color:var(--muted);font-size:11px;font-style:italic;">Loading…</div>
       </div>
       <!-- Section breakdown -->
       <div id="section-strip" style="display:none;flex-wrap:wrap;gap:4px;padding:6px 16px;border-bottom:1px solid var(--border);flex-shrink:0;"></div>
@@ -2335,11 +2324,8 @@ function mergeAndMap(x,espn) {
     eids.forEach(id=>{if(!map[id])map[id]=[];map[id].push(item);});
   });
   eventFeedMap=map;
-  // Refresh intel panel feed items if an event is selected
-  if(selKey && tracked[selKey]) {
-    const cached = _intelCache[String(tracked[selKey].event_id)];
-    if(cached) renderIntelligence(cached, tracked[selKey]);
-  }
+  // Refresh portfolio feed panel whenever feedItems updates
+  if(selKey && tracked[selKey]) renderPortfolioFeed(tracked[selKey]);
   return merged;
 }
 
@@ -2650,89 +2636,71 @@ async function listenToTevo(token,pid) {
 // ════════════════════════════════════════════════════════════════
 let _intelCache={};
 async function loadIntelligence(key){
+  // Feed items already in memory from loadFeed — no GAS call needed.
+  // Renders immediately from eventFeedMap. Refreshes again after feed loads.
   const ev=tracked[key]; if(!ev||!ev.event_id) return;
-  const panel=document.getElementById('intel-panel');
-  const body=document.getElementById('intel-body');
-  const load=document.getElementById('intel-loading');
-  if(!panel) return;
-  panel.style.display='block';
-  if(body) body.innerHTML='';
-  if(load){load.style.display='block';load.textContent='Loading…';}
-  const cid=String(ev.event_id);
-  const cached=_intelCache[cid];
-  if(cached&&Date.now()-cached._ts<15*60*1000){renderIntelligence(cached,ev);return;}
-  try{
-    const d=await gasGet({action:'get_intelligence',event_id:ev.event_id});
-    if(!d||!d.ok){if(load)load.textContent='No baseline data yet';return;}
-    d._ts=Date.now();_intelCache[cid]=d;renderIntelligence(d,ev);
-  }catch(e){if(load)load.textContent='Unavailable';}
+  renderPortfolioFeed(ev);
 }
-function renderIntelligence(d,ev){
-  const body=document.getElementById('intel-body');
-  const load=document.getElementById('intel-loading');
-  const mEl=document.getElementById('intel-matchup');
-  const curv=document.getElementById('intel-curve');
-  if(!body) return;
-  if(load) load.style.display='none';
-  if(mEl){
-    const szn=d.season_type==='playoff'?'🏆 PLAYOFFS':d.season_type==='preseason'?'PRESEASON':'';
-    const dow=d.day_of_week?d.day_of_week.substring(0,3).toUpperCase():'';
-    const hr=d.local_hour!=null?(d.local_hour>12?(d.local_hour-12)+'pm ET':d.local_hour+'am ET'):'';
-    mEl.textContent=[szn,dow,hr].filter(Boolean).join(' · ');
-  }
-  const cells=[];
-  if(d.venue_cat&&d.venue_cat.samples>=2)
-    cells.push(iCard(d.venue+' base',fmt(d.venue_cat.floor_avg),d.venue_cat.samples+' games','iy'));
-  else cells.push(iCard('Venue baseline','—','Need 2+ samples','im'));
-  if(d.venue_home&&d.venue_home.samples>=2)
-    cells.push(iCard((d.home_performer||'Home')+' home',fmt(d.venue_home.floor_avg),d.venue_home.samples+' games','iy'));
-  else cells.push(iCard(d.home_performer||'Home','—','Need 2+ samples','im'));
-  if(d.matchup&&d.matchup.samples>=2&&d.matchup.opponent_premium_floor!=null){
-    const p=d.matchup.opponent_premium_floor,pc=d.matchup.opponent_premium_pct;
-    const sign=p>=0?'+':'';const cls=p>10?'ip':p<-10?'in':'iy';
-    cells.push(iCard((d.away_performer||'Visitor')+' premium',sign+'$'+Math.abs(p).toFixed(0),sign+(pc||0)+'% vs home · '+d.matchup.samples+' matchups',cls));
-  } else if(d.matchup&&d.matchup.samples>0)
-    cells.push(iCard(d.away_performer||'Visitor','~',d.matchup.samples+' tracked (need 3+)','im'));
-  else cells.push(iCard(d.away_performer||'Visitor','—',d.away_performer?'No matchup history yet':'Solo/concert event','im'));
-  body.innerHTML=cells.join('');
-  const curve=d.matchup?.days_out_curve||d.venue_home?.days_out_curve;
-  if(curve&&Object.keys(curve).length>=2&&curv){renderICurve(curve,ev);curv.style.display='block';}
-  else if(curv) curv.style.display='none';
+function renderIntelligence(d, ev) {
+  // Intel panel now shows matched feed items only — no baseline cards.
+  // Baseline data (venue avg, opponent premium) deferred to F5 Explorer.
+  renderPortfolioFeed(ev);
+}
 
-  // ── Matched feed items below curve ───────────────────────────
-  // Show feed items matched to this event directly in the intel panel.
-  // Uses eventFeedMap built from feedItems — zero extra reads.
-  const intelFeed     = document.getElementById('intel-feed');
-  const intelFeedList = document.getElementById('intel-feed-list');
-  if(intelFeed && intelFeedList) {
-    const eid = String(ev.event_id||'');
-    const items = (eventFeedMap[eid]||[])
-      .filter(i => i.title && i.title.length > 5)
-      .sort((a,b) => new Date(b.pubDate||0) - new Date(a.pubDate||0))
-      .slice(0, 10);
-    if(items.length) {
-      intelFeedList.innerHTML = items.map(item => {
-        const icon   = item.srcType==='espn' ? '📺' : '🐦';
-        const ic     = item.impact==='High'?'var(--red)':item.impact==='Medium'?'var(--yellow)':'var(--muted)';
-        const handle = item.handle||item.author||'';
-        return `<div style="display:flex;gap:6px;padding:4px 0;border-bottom:1px solid var(--border);cursor:pointer;align-items:flex-start;"
-          onclick="${item.link?`window.open('${item.link.replace(/'/g,'')}')`:''}" >
-          <span style="font-size:11px;flex-shrink:0;">${icon}</span>
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:11px;color:var(--white);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${item.title}</div>
-            <div style="font-size:10px;color:var(--muted);display:flex;gap:8px;margin-top:1px;">
-              ${item.impact?`<span style="color:${ic};">${item.impact}</span>`:''}
-              ${handle?`<span>${handle}</span>`:''}
-              <span>${ago(item.pubDate)}</span>
-            </div>
-          </div>
-        </div>`;
-      }).join('');
-      intelFeed.style.display='block';
-    } else {
-      intelFeed.style.display='none';
-    }
+function renderPortfolioFeed(ev) {
+  const panel   = document.getElementById('intel-panel');
+  const list    = document.getElementById('intel-feed-list');
+  const load    = document.getElementById('intel-loading');
+  const matchEl = document.getElementById('intel-matchup');
+  if(!panel || !list) return;
+
+  const eid   = String(ev.event_id||'');
+  const items = (eventFeedMap[eid]||[])
+    .filter(i => i.title && i.title.length > 5)
+    .sort((a,b) => new Date(b.pubDate||0) - new Date(a.pubDate||0))
+    .slice(0, 15);
+
+  if(!items.length) {
+    panel.style.display='none';
+    return;
   }
+
+  panel.style.display='block';
+  if(load) load.style.display='none';
+
+  // Header: item count + high impact count
+  const highN = items.filter(i=>i.impact==='High').length;
+  if(matchEl) {
+    matchEl.textContent = items.length + ' item' + (items.length!==1?'s':'') +
+      (highN ? ' · ' + highN + ' HIGH' : '');
+    matchEl.style.color = highN ? 'var(--red)' : 'var(--muted)';
+  }
+
+  list.innerHTML = items.map(item => {
+    const icon   = item.srcType==='espn' ? '📺' : '🐦';
+    const ic     = item.impact==='High'  ? 'var(--red)'
+                 : item.impact==='Medium'? 'var(--yellow)'
+                 : 'var(--muted)';
+    const handle = item.handle || item.author || '';
+    const link   = item.link   || '';
+    return `<div style="display:flex;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);
+        cursor:pointer;transition:background .1s;"
+        onmouseover="this.style.background='rgba(255,255,255,.03)'"
+        onmouseout="this.style.background=''"
+        onclick="${link ? `window.open('${link.replace(/'/g,'')}')` : ''}">
+      <span style="font-size:12px;flex-shrink:0;margin-top:1px;">${icon}</span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12px;color:var(--white);line-height:1.4;overflow:hidden;
+          display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${item.title}</div>
+        <div style="font-size:10px;color:var(--muted);display:flex;gap:8px;margin-top:3px;flex-wrap:wrap;">
+          ${item.impact?`<span style="font-weight:600;color:${ic};">${item.impact}</span>`:''}
+          ${handle?`<span style="color:var(--orange);">${handle}</span>`:''}
+          <span>${ago(item.pubDate)}</span>
+          ${item.keywords?.length?`<span style="color:var(--purple);">${item.keywords.slice(0,2).join(' · ')}</span>`:''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
 }
 function iCard(lbl,val,sub,cls){
   return '<div class="intel-stat"><div class="il">'+lbl+'</div><div class="iv '+cls+'">'+val+'</div><div class="is">'+sub+'</div></div>';

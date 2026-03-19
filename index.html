@@ -3210,6 +3210,202 @@ async function init() {
   });
 }
 
+// ================================================================
+// F6 PERFORMER + F7 VENUE
+// ================================================================
+let aggCharts = {perf:null, venue:null};
+let aggMode   = {perf:'price', venue:'price'};
+
+function refreshAggPanels() {
+  const perfPanel  = document.getElementById('panel-performer');
+  const venuePanel = document.getElementById('panel-venue');
+  if (perfPanel  && perfPanel.classList.contains('active'))  loadAggPanel('perf');
+  if (venuePanel && venuePanel.classList.contains('active')) loadAggPanel('venue');
+}
+
+function switchAggMode(mode, prefix, el) {
+  aggMode[prefix] = mode;
+  const pid = prefix==='perf' ? 'panel-performer' : 'panel-venue';
+  const panel = document.getElementById(pid);
+  if (panel) panel.querySelectorAll('.c-tab').forEach(t=>t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  renderAggChart(prefix, buildAggData(prefix));
+}
+
+function buildAggData(prefix) {
+  if (!selKey || !tracked[selKey]) return null;
+  const sel = tracked[selKey];
+  const matchKey = prefix==='perf' ? 'performer_id' : 'venue_id';
+  const matchVal = prefix==='perf' ? sel.performer_id : sel.venue_id;
+  if (!matchVal) return null;
+
+  const relEvents = Object.values(tracked).filter(ev =>
+    ev[matchKey] && String(ev[matchKey])===String(matchVal) &&
+    ev.history && ev.history.length>0
+  );
+  if (!relEvents.length) return null;
+
+  const allTs = [...new Set(
+    relEvents.flatMap(ev=>(ev.history||[]).map(s=>s.ts))
+  )].sort();
+
+  const aggregated = allTs.map(ts => {
+    const tsMs = new Date(ts).getTime();
+    const snaps = relEvents.flatMap(ev =>
+      (ev.history||[]).filter(s=>Math.abs(new Date(s.ts).getTime()-tsMs)<2*3600*1000)
+    );
+    if (!snaps.length) return null;
+    const avg = arr => arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0;
+    const floors = snaps.map(s=>s.floor).filter(v=>v>0);
+    const maxes  = snaps.map(s=>s.max).filter(v=>v>0);
+    return {
+      ts,
+      floor:  floors.length ? Math.min(...floors) : 0,
+      avg:    avg(snaps.map(s=>s.avg).filter(v=>v>0)),
+      median: avg(snaps.map(s=>s.median).filter(v=>v>0)),
+      max:    maxes.length  ? Math.max(...maxes)  : 0,
+      count:  snaps.reduce((a,s)=>a+(s.count||0),0)
+    };
+  }).filter(Boolean);
+
+  return {aggregated, relEvents, matchVal};
+}
+
+function loadAggPanel(prefix) {
+  if (!selKey || !tracked[selKey]) return;
+  const sel    = tracked[selKey];
+  const isPerf = prefix==='perf';
+  const label  = isPerf ? (sel.performer||sel.name||'—') : (sel.venue||'—');
+  const sub    = sel.venue_city||'';
+
+  const titleEl = document.getElementById(prefix+'-title');
+  const subEl   = document.getElementById(prefix+'-sub');
+  if (titleEl) titleEl.textContent = label;
+  if (subEl)   subEl.textContent   = sub;
+
+  const data = buildAggData(prefix);
+  if (!data || !data.aggregated.length) {
+    ['f','a','m','x','c'].forEach(k=>{
+      const el=document.getElementById(prefix+'-'+k); if(el) el.textContent='—';
+    });
+    const ce=document.getElementById(prefix+'-event-count'); if(ce) ce.textContent='';
+    renderAggChart(prefix, null);
+    const np=document.getElementById(prefix+'-news-panel'); if(np) np.style.display='none';
+    return;
+  }
+
+  const lat = data.aggregated[data.aggregated.length-1];
+  const setEl = (id,val)=>{const el=document.getElementById(id);if(el)el.textContent=val;};
+  setEl(prefix+'-f', fmt(lat.floor));
+  setEl(prefix+'-a', fmt(lat.avg));
+  setEl(prefix+'-m', fmt(lat.median));
+  setEl(prefix+'-x', fmt(lat.max));
+  setEl(prefix+'-c', fmtC(lat.count));
+
+  const ce=document.getElementById(prefix+'-event-count');
+  if(ce) ce.textContent=data.relEvents.length+' event'+(data.relEvents.length!==1?'s':'');
+
+  renderAggChart(prefix, data);
+  renderAggNews(prefix, data);
+}
+
+function renderAggChart(prefix, data) {
+  const canvas = document.getElementById(prefix+'-ch');
+  const empty  = document.getElementById(prefix+'-empty');
+  if (!canvas||!empty) return;
+  if (aggCharts[prefix]) { aggCharts[prefix].destroy(); aggCharts[prefix]=null; }
+  if (!data||!data.aggregated.length) {
+    canvas.style.display='none'; empty.style.display='flex'; return;
+  }
+  canvas.style.display='block'; empty.style.display='none';
+
+  const h = data.aggregated;
+  const ET = (new Date().getTimezoneOffset()<300?4:5)*3600000;
+  const labels = h.map(s=>{
+    const d=new Date(new Date(s.ts).getTime()-ET);
+    return (d.getUTCMonth()+1)+'/'+d.getUTCDate()+' '+
+      d.getUTCHours().toString().padStart(2,'0')+':'+d.getUTCMinutes().toString().padStart(2,'0')+'ET';
+  });
+
+  const base = {
+    responsive:true, maintainAspectRatio:false,
+    interaction:{mode:'index',intersect:false},
+    plugins:{
+      legend:{labels:{color:'#80868B',font:{family:"'Roboto Mono',monospace",size:10},boxWidth:10,padding:12}},
+      tooltip:{backgroundColor:'#1A1D27',borderColor:'rgba(255,255,255,0.12)',borderWidth:1,
+        titleColor:'#FBBC04',bodyColor:'#E8EAED',padding:10}
+    },
+    scales:{
+      x:{ticks:{color:'#80868B',font:{family:"'Roboto Mono',monospace",size:9},maxRotation:45},
+         grid:{color:'rgba(255,255,255,0.06)'}},
+      y:{ticks:{color:'#80868B'},grid:{color:'rgba(255,255,255,0.06)'}}
+    }
+  };
+
+  if (aggMode[prefix]==='count') {
+    base.scales.y.ticks.callback = v=>v.toLocaleString();
+    base.plugins.tooltip.callbacks = {label:ctx=>` Listings: ${ctx.parsed.y.toLocaleString()}`};
+    aggCharts[prefix] = new Chart(canvas,{type:'bar',data:{labels,datasets:[{
+      label:'Total Listings',data:h.map(s=>s.count),
+      backgroundColor:'rgba(52,168,83,0.15)',borderColor:'#34A853',borderWidth:1.5,borderRadius:4
+    }]},options:base});
+  } else {
+    base.scales.y.ticks.callback = v=>'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+    base.plugins.tooltip.callbacks = {label:ctx=>` ${ctx.dataset.label}: $${Number(ctx.parsed.y).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`};
+    aggCharts[prefix] = new Chart(canvas,{type:'line',data:{labels,datasets:[
+      {label:'Floor', data:h.map(s=>s.floor), borderColor:'#24C1E0',backgroundColor:'rgba(36,193,224,0.06)',tension:0.3,fill:true, borderWidth:1.5,pointRadius:3,spanGaps:true},
+      {label:'Median',data:h.map(s=>s.median),borderColor:'#A142F4',tension:0.3,fill:false,borderWidth:1.5,pointRadius:2,borderDash:[5,3],spanGaps:true},
+      {label:'Avg',   data:h.map(s=>s.avg),   borderColor:'#FBBC04',tension:0.3,fill:false,borderWidth:1.5,pointRadius:2,borderDash:[4,3],spanGaps:true},
+      {label:'Max',   data:h.map(s=>s.max),   borderColor:'#EA4335',tension:0.3,fill:false,borderWidth:1,  pointRadius:2,borderDash:[2,4],spanGaps:true},
+    ]},options:base});
+  }
+}
+
+function renderAggNews(prefix, data) {
+  const panelEl = document.getElementById(prefix+'-news-panel');
+  const listEl  = document.getElementById(prefix+'-news-list');
+  const countEl = document.getElementById(prefix+'-news-count');
+  if (!panelEl||!listEl) return;
+
+  const allItems=[], seen=new Set();
+  (data.relEvents||[]).forEach(ev=>{
+    (eventFeedMap[String(ev.event_id||'')]||[]).forEach(item=>{
+      const k=(item.title||'').substring(0,40);
+      if(!seen.has(k)&&item.title&&item.title.length>5){seen.add(k);allItems.push(item);}
+    });
+  });
+
+  if(!allItems.length){panelEl.style.display='none';return;}
+  panelEl.style.display='block';
+
+  const sorted=allItems.sort((a,b)=>new Date(b.pubDate||0)-new Date(a.pubDate||0)).slice(0,15);
+  const highN=sorted.filter(i=>i.impact==='High').length;
+  if(countEl){
+    countEl.textContent=sorted.length+' item'+(sorted.length!==1?'s':'')+(highN?' · '+highN+' HIGH':'');
+    countEl.style.color=highN?'var(--red)':'var(--muted)';
+  }
+  listEl.innerHTML=sorted.map(item=>{
+    const icon=item.srcType==='espn'?'📺':'🐦';
+    const ic=item.impact==='High'?'var(--red)':item.impact==='Medium'?'var(--yellow)':'var(--muted)';
+    const handle=item.handle||item.author||'';
+    const link=item.link||'';
+    return `<div style="display:flex;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s;"
+        onmouseover="this.style.background='rgba(255,255,255,.03)'" onmouseout="this.style.background=''"
+        onclick="${link?`window.open('${link.replace(/'/g,'')}')`:''}" >
+      <span style="font-size:12px;flex-shrink:0;margin-top:1px;">${icon}</span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12px;color:var(--white);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${item.title}</div>
+        <div style="font-size:10px;color:var(--muted);display:flex;gap:8px;margin-top:3px;flex-wrap:wrap;">
+          ${item.impact?`<span style="font-weight:600;color:${ic};">${item.impact}</span>`:''}
+          ${handle?`<span style="color:var(--orange);">${handle}</span>`:''}
+          <span>${ago(item.pubDate)}</span>
+          ${item.event_name?`<span style="color:var(--yellow);">${item.event_name.substring(0,28)}</span>`:''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
 window.addEventListener('load', init);
 
 </script>

@@ -565,6 +565,52 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
           </div>
         </div>
       </div>
+      <!-- SeatGeek row — hidden until sg_floor exists for this event -->
+      <div id="sg-strip" style="display:none;">
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid rgba(255,255,255,0.04);">
+          <div style="grid-column:1/-1;" class="row-lbl" style="color:var(--blue);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            SeatGeek <span style="font-size:9px;font-weight:400;color:var(--muted);">(public market)</span>
+            <span id="sg-deal" style="font-size:9px;font-weight:400;color:var(--muted);"></span>
+            <span style="margin-left:auto;display:flex;align-items:center;gap:4px;">
+              <input id="sg-event-id-input" type="text" placeholder="SG Event ID…"
+                style="font-family:var(--font);font-size:10px;padding:2px 7px;width:110px;
+                       background:var(--bg3);border:1px solid var(--border);border-radius:4px;
+                       color:var(--text2);outline:none;"
+                onkeydown="if(event.key==='Enter')saveSGEventId()"
+                onfocus="this.style.borderColor='var(--blue)'"
+                onblur="this.style.borderColor='var(--border)'"/>
+              <button onclick="saveSGEventId()"
+                style="font-family:var(--ui);font-size:10px;padding:2px 9px;border-radius:4px;
+                       background:var(--blue-dim);color:var(--blue);border:1px solid rgba(66,133,244,0.3);
+                       cursor:pointer;" title="Save SeatGeek event ID mapping">Map</button>
+              <span id="sg-map-status" style="font-size:10px;color:var(--muted);"></span>
+            </span>
+          </div>
+        </div>
+        <div class="metrics-row">
+          <div class="metric">
+            <div class="metric-lbl">Floor</div>
+            <div class="metric-val" id="sg-f" style="color:var(--blue);">—</div>
+            <div class="metric-delta" id="sg-fd"></div>
+          </div>
+          <div class="metric">
+            <div class="metric-lbl">Average</div>
+            <div class="metric-val" id="sg-a" style="color:var(--blue);">—</div>
+          </div>
+          <div class="metric">
+            <div class="metric-lbl">Median</div>
+            <div class="metric-val" id="sg-m" style="color:var(--blue);">—</div>
+          </div>
+          <div class="metric">
+            <div class="metric-lbl">Max</div>
+            <div class="metric-val" id="sg-x" style="color:var(--blue);">—</div>
+          </div>
+          <div class="metric">
+            <div class="metric-lbl">Listings</div>
+            <div class="metric-val" id="sg-c" style="color:var(--blue);">—</div>
+          </div>
+        </div>
+      </div>
       <!-- Parking toggle -->
       <div class="parking-tog" id="parking-tog" style="display:none;">
         <span style="font-size:11px;color:var(--muted);">
@@ -1607,7 +1653,7 @@ async function selectEvent(key) {
   updateEventFeedStrip(key);
 
   // Load history + markers in parallel
-  await Promise.allSettled([loadHistory(key), loadEventFeedMarkers(key), loadIntelligence(key)]);
+  await Promise.allSettled([loadHistory(key), loadEventFeedMarkers(key), loadIntelligence(key), loadSGData(key)]);
   if (selKey===key) { renderDetail(key); renderChart(tracked[key]); setSt('Ready'); }
 }
 
@@ -1732,6 +1778,53 @@ function renderDetail(key) {
       if(tf&&tf[1]>0.3) sigs.push(`<span class="sig-pill" title="Dominant delivery format">${tf[0].replace(/_/g,' ')} ${Math.round(tf[1]*100)}%</span>`);
       sigEl.innerHTML=sigs.join('');
       sigEl.style.display=sigs.length?'flex':'none';
+    }
+
+    // ── SeatGeek row ──────────────────────────────────────────────
+    const sgStrip = document.getElementById('sg-strip');
+    if (sgStrip) {
+      // Read sg_ fields from latest history snap or event_index
+      // event_index is loaded separately via loadSGForEvent()
+      const sg = tracked[key]?._sg || null;
+      if (sg && sg.sg_floor > 0) {
+        sgStrip.style.display = '';
+        const setEl = (id,val) => { const el=document.getElementById(id); if(el) el.textContent=val; };
+        setEl('sg-f', fmt(sg.sg_floor));
+        setEl('sg-a', fmt(sg.sg_avg));
+        setEl('sg-m', fmt(sg.sg_median));
+        setEl('sg-x', fmt(sg.sg_max));
+        setEl('sg-c', fmtC(sg.sg_count));
+        const dealEl = document.getElementById('sg-deal');
+        if (dealEl && sg.sg_deal_score)
+          dealEl.textContent = `deal score ${sg.sg_deal_score}`;
+        // Populate input with current mapping
+        const sgInput = document.getElementById('sg-event-id-input');
+        if (sgInput && sg.sg_event_id) sgInput.value = sg.sg_event_id;
+        const sgStatus = document.getElementById('sg-map-status');
+        if (sgStatus) sgStatus.textContent = sg.sg_snapshot_ts ? 'mapped ✓' : '';
+        // vs TEvo floor delta
+        const sgFd = document.getElementById('sg-fd');
+        if (sgFd && lat && lat.floor > 0) {
+          const diff = sg.sg_floor - lat.floor;
+          sgFd.innerHTML = dHtml(diff, false);
+        }
+        // Clear input for unmapped events
+        const sgInput2 = document.getElementById('sg-event-id-input');
+        if (sgInput2) sgInput2.value = '';
+        const sgStatus2 = document.getElementById('sg-map-status');
+        if (sgStatus2) sgStatus2.textContent = '';
+      } else {
+        // No SG data yet — still show the row so user can enter an ID
+        sgStrip.style.display = '';
+        ['sg-f','sg-a','sg-m','sg-x','sg-c'].forEach(id => {
+          const el = document.getElementById(id); if(el) el.textContent = '—';
+        });
+        const sgInput2 = document.getElementById('sg-event-id-input');
+        // Pre-fill if we have a stored sg_event_id even without price data
+        if (sgInput2) sgInput2.value = tracked[key]?._sg?.sg_event_id || '';
+        const sgStatus2 = document.getElementById('sg-map-status');
+        if (sgStatus2) sgStatus2.textContent = '';
+      }
     }
 
     // ── Parking toggle visibility ─────────────────────────────────
@@ -2662,6 +2755,56 @@ async function listenToTevo(token,pid) {
 // DEV NOTE: chatbot will call these same GAS endpoints via natural language.
 // ════════════════════════════════════════════════════════════════
 let _intelCache={};
+async function saveSGEventId() {
+  if (!selKey || !tracked[selKey]) return;
+  const input  = document.getElementById('sg-event-id-input');
+  const status = document.getElementById('sg-map-status');
+  const sgId   = (input?.value||'').trim();
+  if (!sgId) { if(status) status.textContent = 'enter an ID'; return; }
+
+  const tevoId = tracked[selKey].event_id;
+  if (status) { status.textContent = 'saving…'; status.style.color = 'var(--muted)'; }
+  try {
+    const d = await gasPost({action:'save_sg_mapping', tevo_id:tevoId, sg_id:sgId});
+    if (d.ok) {
+      if (status) { status.textContent = 'mapped ✓'; status.style.color = 'var(--green)'; }
+      // Store locally and trigger a SG fetch
+      if (!tracked[selKey]._sg) tracked[selKey]._sg = {};
+      tracked[selKey]._sg.sg_event_id = sgId;
+      toast(`SeatGeek mapped: ${tracked[selKey].name}`);
+      // Trigger fetch immediately via GAS
+      gasPost({action:'fetch_sg_now', tevo_id:tevoId, sg_id:sgId}).catch(()=>{});
+    } else {
+      if (status) { status.textContent = 'error'; status.style.color = 'var(--red)'; }
+    }
+  } catch(e) {
+    if (status) { status.textContent = 'failed'; status.style.color = 'var(--red)'; }
+  }
+}
+
+async function loadSGData(key) {
+  // Load SeatGeek data from event_index sg_ fields — zero extra Firestore reads
+  // event_index already has sg_floor/avg/median/max/count/deal_score from pollSeatGeek()
+  const ev = tracked[key]; if (!ev || !ev.event_id) return;
+  try {
+    const idx = await FS.getEventIndex(ev.event_id);
+    if (idx && idx.sg_floor > 0) {
+      tracked[key]._sg = {
+        sg_floor:      Number(idx.sg_floor      || 0),
+        sg_avg:        Number(idx.sg_avg        || 0),
+        sg_median:     Number(idx.sg_median     || 0),
+        sg_max:        Number(idx.sg_max        || 0),
+        sg_count:      Number(idx.sg_count      || 0),
+        sg_ws_floor:   Number(idx.sg_ws_floor   || 0),
+        sg_deal_score: idx.sg_deal_score        || null,
+        sg_snapshot_ts:idx.sg_snapshot_ts       || '',
+        sg_event_id:   idx.sg_event_id          || ''
+      };
+      if (selKey === key) renderDetail(key);
+    }
+  } catch(e) {}
+}
+
 async function loadIntelligence(key){
   // Feed items already in memory from loadFeed — no GAS call needed.
   // Renders immediately from eventFeedMap. Refreshes again after feed loads.

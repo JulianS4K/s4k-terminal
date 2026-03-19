@@ -553,22 +553,22 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
           <div class="metrics-row">
             <div class="metric">
               <div class="metric-lbl">Floor</div>
-              <div class="metric-val owned" id="o-f">—</div>
+              <div class="metric-val" id="o-f" style="color:#34A853;">—</div>
               <div class="metric-delta" id="o-fd"></div>
             </div>
             <div class="metric">
               <div class="metric-lbl">Average</div>
-              <div class="metric-val owned" id="o-a">—</div>
+              <div class="metric-val" id="o-a" style="color:#1E8E3E;">—</div>
               <div class="metric-delta"></div>
             </div>
             <div class="metric">
               <div class="metric-lbl">Median</div>
-              <div class="metric-val owned" id="o-m">—</div>
+              <div class="metric-val" id="o-m" style="color:#81C995;">—</div>
               <div class="metric-delta"></div>
             </div>
             <div class="metric">
               <div class="metric-lbl">Max</div>
-              <div class="metric-val owned" id="o-x">—</div>
+              <div class="metric-val" id="o-x" style="color:#0D652D;">—</div>
               <div class="metric-delta"></div>
             </div>
             <div class="metric">
@@ -604,24 +604,24 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
         <div class="metrics-row">
           <div class="metric">
             <div class="metric-lbl">Floor</div>
-            <div class="metric-val" id="sg-f" style="color:var(--blue);">—</div>
+            <div class="metric-val" id="sg-f" style="color:#4285F4;">—</div>
             <div class="metric-delta" id="sg-fd"></div>
           </div>
           <div class="metric">
             <div class="metric-lbl">Average</div>
-            <div class="metric-val" id="sg-a" style="color:var(--blue);">—</div>
+            <div class="metric-val" id="sg-a" style="color:#3367D6;">—</div>
           </div>
           <div class="metric">
             <div class="metric-lbl">Median</div>
-            <div class="metric-val" id="sg-m" style="color:var(--blue);">—</div>
+            <div class="metric-val" id="sg-m" style="color:#7BAAF7;">—</div>
           </div>
           <div class="metric">
             <div class="metric-lbl">Max</div>
-            <div class="metric-val" id="sg-x" style="color:var(--blue);">—</div>
+            <div class="metric-val" id="sg-x" style="color:#174EA6;">—</div>
           </div>
           <div class="metric">
             <div class="metric-lbl">Listings</div>
-            <div class="metric-val" id="sg-c" style="color:var(--blue);">—</div>
+            <div class="metric-val" id="sg-c" style="color:var(--muted);">—</div>
           </div>
         </div>
       </div>
@@ -651,13 +651,17 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
             </div>
             <div class="tog-group">
               <span class="tog-group-lbl" style="color:#4285F4;">SG</span>
-              <div class="c-tog" onclick="togS('sgfloor',this)" id="tog-sgf">F</div>
-              <div class="c-tog" onclick="togS('sgavg',this)" id="tog-sga">A</div>
+              <div class="c-tog" onclick="togS('sgfloor',this)" id="tog-sgf" style="--act:#4285F4;">F</div>
+              <div class="c-tog" onclick="togS('sgmed',this)"   id="tog-sgm" style="--act:#7BAAF7;">M</div>
+              <div class="c-tog" onclick="togS('sgavg',this)"   id="tog-sga" style="--act:#3367D6;">A</div>
+              <div class="c-tog" onclick="togS('sgmax',this)"   id="tog-sgx" style="--act:#174EA6;">X</div>
             </div>
             <div class="tog-group">
               <span class="tog-group-lbl" style="color:#34A853;">OWN</span>
-              <div class="c-tog" onclick="togS('owfloor',this)" id="tog-owf">F</div>
-              <div class="c-tog" onclick="togS('owavg',this)" id="tog-owa">A</div>
+              <div class="c-tog" onclick="togS('owfloor',this)" id="tog-owf" style="--act:#34A853;">F</div>
+              <div class="c-tog" onclick="togS('owmed',this)"   id="tog-owm" style="--act:#81C995;">M</div>
+              <div class="c-tog" onclick="togS('owavg',this)"   id="tog-owa" style="--act:#1E8E3E;">A</div>
+              <div class="c-tog" onclick="togS('owmax',this)"   id="tog-owx" style="--act:#0D652D;">X</div>
             </div>
           </div>
           <!-- Data window filter -->
@@ -896,7 +900,9 @@ const APP_VERSION = 'Alpha 2.0';
 
 let tracked = {}, selKey = null;
 let chart = null, cmode = 'price';
-let son = {floor:true, med:false, avg:false, max:false, sgfloor:false, sgavg:false, owfloor:false, owavg:false};
+let son = {floor:true, med:false, avg:false, max:false,
+            sgfloor:false, sgmed:false, sgavg:false, sgmax:false,
+            owfloor:false, owmed:false, owavg:false, owmax:false};
 let chartWindow = '24h'; // active data window
 let xFeedItems = [], espnFeedItems = [], feedItems = [], lastFeedLoad = 0;
 let eventFeedMap = {};
@@ -1885,9 +1891,34 @@ function updateTotal() {
 // ── Chart ───────────────────────────────────────────────────────
 function togS(s,el) {
   son[s]=!son[s];
-  const classMap={floor:'f',med:'m',avg:'a',max:'x',sgfloor:'sgf',sgavg:'sga',owfloor:'owf',owavg:'owa'};
-  const tog=document.getElementById('tog-'+classMap[s]);
-  if(tog) tog.className='c-tog'+(son[s]?' on-'+classMap[s]:'');
+  const classMap={
+    floor:'f', med:'m', avg:'a', max:'x',
+    sgfloor:'sgf', sgmed:'sgm', sgavg:'sga', sgmax:'sgx',
+    owfloor:'owf', owmed:'owm', owavg:'owa', owmax:'owx'
+  };
+  // Color per series — matches metric row colors exactly
+  const colorMap={
+    floor:'rgba(36,193,224,.15)',  med:'rgba(161,66,244,.15)',  avg:'rgba(251,188,4,.15)',  max:'rgba(234,67,53,.15)',
+    sgfloor:'rgba(66,133,244,.15)',sgmed:'rgba(123,170,247,.15)',sgavg:'rgba(51,103,214,.15)',sgmax:'rgba(23,78,166,.15)',
+    owfloor:'rgba(52,168,83,.15)', owmed:'rgba(129,201,149,.15)',owavg:'rgba(30,142,62,.15)', owmax:'rgba(13,101,45,.15)'
+  };
+  const textColor={
+    floor:'#24C1E0', med:'#A142F4', avg:'#FBBC04', max:'#EA4335',
+    sgfloor:'#4285F4', sgmed:'#7BAAF7', sgavg:'#3367D6', sgmax:'#174EA6',
+    owfloor:'#34A853', owmed:'#81C995', owavg:'#1E8E3E', owmax:'#0D652D'
+  };
+  const borderColorMap={
+    floor:'rgba(36,193,224,.3)',   med:'rgba(161,66,244,.3)',   avg:'rgba(251,188,4,.3)',   max:'rgba(234,67,53,.3)',
+    sgfloor:'rgba(66,133,244,.4)', sgmed:'rgba(123,170,247,.4)',sgavg:'rgba(51,103,214,.4)',sgmax:'rgba(23,78,166,.4)',
+    owfloor:'rgba(52,168,83,.4)',  owmed:'rgba(129,201,149,.4)',owavg:'rgba(30,142,62,.4)', owmax:'rgba(13,101,45,.4)'
+  };
+  const togEl = document.getElementById('tog-'+classMap[s]);
+  if (togEl) {
+    togEl.style.background    = son[s] ? colorMap[s]      : '';
+    togEl.style.color         = son[s] ? textColor[s]     : '';
+    togEl.style.borderColor   = son[s] ? borderColorMap[s]: '';
+  }
+  // togEl handled above with direct style
   if(selKey&&cmode==='price') renderChart(tracked[selKey]);
 }
 
@@ -2015,40 +2046,29 @@ function _renderChartNow(r) {
     if(son.max)   ds.push({label:'TE Max',data:h.map(s=>s.max),borderColor:'#EA4335',tension:0.3,pointRadius:singlePoint?8:3,fill:false,borderWidth:1,borderDash:singlePoint?[]:[2,4],spanGaps:true});
     // ── SeatGeek lines — read sg history from seatgeek/ snapshots ──
     const sgH = filterByWindow((r.sgHistory||[]).filter(s=>s.floor>0));
-    if(son.sgfloor && sgH.length) {
-      // Align SG timestamps to chart labels by nearest match
-      const sgData = h.map(snap => {
-        if (!sgH.length) return null;
-        const snapT = new Date(snap.ts).getTime();
-        const nearest = sgH.reduce((a,b) => Math.abs(new Date(b.ts)-snapT) < Math.abs(new Date(a.ts)-snapT) ? b : a);
-        return Math.abs(new Date(nearest.ts)-snapT) < 2*3600*1000 ? nearest.floor : null;
-      });
-      ds.push({label:'SG Floor',data:sgData,borderColor:'#4285F4',backgroundColor:'rgba(66,133,244,0.05)',tension:0.3,pointRadius:3,fill:false,borderWidth:2,borderDash:[6,2],spanGaps:true});
-    }
-    if(son.sgavg && sgH.length) {
-      const sgData = h.map(snap => {
-        const snapT = new Date(snap.ts).getTime();
-        const nearest = sgH.reduce((a,b) => Math.abs(new Date(b.ts)-snapT) < Math.abs(new Date(a.ts)-snapT) ? b : a);
-        return Math.abs(new Date(nearest.ts)-snapT) < 2*3600*1000 ? nearest.avg : null;
-      });
-      ds.push({label:'SG Avg',data:sgData,borderColor:'#7BAAF7',tension:0.3,pointRadius:3,fill:false,borderWidth:1.5,borderDash:[4,4],spanGaps:true});
-    }
-    // ── Owned lines — from TEvo owned stats in history ─────────────
+    // ── SeatGeek lines ─────────────────────────────────────────────
+    const sgH = filterByWindow((r.sgHistory||[]).filter(s=>s.floor>0));
+    // Helper: align SG snapshot to nearest TEvo timestamp (within 2h)
+    const alignSG = (field) => h.map(snap => {
+      if (!sgH.length) return null;
+      const snapT   = new Date(snap.ts).getTime();
+      const nearest = sgH.reduce((a,b) => Math.abs(new Date(b.ts)-snapT)<Math.abs(new Date(a.ts)-snapT)?b:a);
+      return Math.abs(new Date(nearest.ts)-snapT) < 2*3600*1000 ? (nearest[field]||null) : null;
+    });
+    if(son.sgfloor && sgH.length) ds.push({label:'SG Floor', data:alignSG('floor'),  borderColor:'#4285F4',backgroundColor:'rgba(66,133,244,0.06)', tension:0.3,pointRadius:3,fill:false,borderWidth:2,  borderDash:[6,2],spanGaps:true});
+    if(son.sgmed   && sgH.length) ds.push({label:'SG Median',data:alignSG('median'), borderColor:'#7BAAF7',backgroundColor:'rgba(123,170,247,0.04)',tension:0.3,pointRadius:3,fill:false,borderWidth:1.5,borderDash:[5,3],spanGaps:true});
+    if(son.sgavg   && sgH.length) ds.push({label:'SG Avg',   data:alignSG('avg'),    borderColor:'#3367D6',tension:0.3,pointRadius:3,fill:false,borderWidth:1.5,borderDash:[4,4],spanGaps:true});
+    if(son.sgmax   && sgH.length) ds.push({label:'SG Max',   data:alignSG('max'),    borderColor:'#174EA6',tension:0.3,pointRadius:3,fill:false,borderWidth:1,  borderDash:[2,5],spanGaps:true});
+    // ── Owned lines ────────────────────────────────────────────────
     const owH = filterByWindow((r.history||[]).filter(s=>s.owned&&s.owned.count>0&&s.owned.stats?.retail?.floor>0));
-    if(son.owfloor && owH.length) {
-      const owData = h.map(snap => {
-        const match = owH.find(o=>o.ts===snap.ts);
-        return match ? (match.owned.stats.retail.floor||null) : null;
-      });
-      ds.push({label:'Own Floor',data:owData,borderColor:'#34A853',backgroundColor:'rgba(52,168,83,0.05)',tension:0.3,pointRadius:4,pointStyle:'rect',fill:false,borderWidth:2,borderDash:[5,2],spanGaps:false});
-    }
-    if(son.owavg && owH.length) {
-      const owData = h.map(snap => {
-        const match = owH.find(o=>o.ts===snap.ts);
-        return match ? (match.owned.stats.retail.avg||null) : null;
-      });
-      ds.push({label:'Own Avg',data:owData,borderColor:'#81C995',tension:0.3,pointRadius:3,pointStyle:'rect',fill:false,borderWidth:1.5,borderDash:[3,4],spanGaps:false});
-    }
+    const alignOW = (field) => h.map(snap => {
+      const match = owH.find(o=>o.ts===snap.ts);
+      return match ? (match.owned.stats.retail[field]||null) : null;
+    });
+    if(son.owfloor && owH.length) ds.push({label:'Own Floor', data:alignOW('floor'),  borderColor:'#34A853',backgroundColor:'rgba(52,168,83,0.05)', tension:0.3,pointRadius:4,pointStyle:'rect',fill:false,borderWidth:2,  borderDash:[5,2],spanGaps:false});
+    if(son.owmed   && owH.length) ds.push({label:'Own Median',data:alignOW('median'), borderColor:'#81C995',tension:0.3,pointRadius:4,pointStyle:'rect',fill:false,borderWidth:1.5,borderDash:[4,3],spanGaps:false});
+    if(son.owavg   && owH.length) ds.push({label:'Own Avg',   data:alignOW('avg'),    borderColor:'#1E8E3E',tension:0.3,pointRadius:4,pointStyle:'rect',fill:false,borderWidth:1.5,borderDash:[3,4],spanGaps:false});
+    if(son.owmax   && owH.length) ds.push({label:'Own Max',   data:alignOW('max'),    borderColor:'#0D652D',tension:0.3,pointRadius:4,pointStyle:'rect',fill:false,borderWidth:1,  borderDash:[2,5],spanGaps:false});
     if(feedMarkers.length) ds.push({
       label:'FEED',type:'scatter',showLine:false,order:0,
       data:h.map((_,i)=>{const hit=feedMarkers.find(m=>m.x===i);return hit?hit.y:null;}),

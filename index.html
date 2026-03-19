@@ -1572,7 +1572,7 @@ async function loadHistory(key) {
         // Sanity filter: remove data points where floor << avg (parking leak)
         const validAvg = mapped.reduce((s,p)=>s+(p.avg||0),0) / mapped.length;
         const cleaned  = validAvg > 50
-          ? mapped.filter(p => p.floor >= 20 && p.floor >= validAvg / 6)
+          ? mapped.filter(p => p.floor >= 20 && p.floor >= validAvg / 8)
           : mapped;
         if (cleaned.length > 0) { ev.history = cleaned; loaded = true; }
       }
@@ -2851,7 +2851,7 @@ async function listenToTevo(token,pid) {
           if((ev.history||[]).some(h=>h.ts===np.ts)) continue;
           // Sanity: floor < avg/8 means parking leaked through (e.g. $16/$407)
           if(np.floor < 20) continue; // hard minimum — no real ticket < $20
-          if(np.avg > 50 && np.floor < np.avg / 15) continue; // parking leak (loose — NBA avg skewed by courtside)
+          if(np.avg > 50 && np.floor < np.avg / 8) continue; // parking leak guard
           if(!ev.history) ev.history=[];
           ev.history.push(np);
           ev.history.sort((a,b)=>a.ts.localeCompare(b.ts));
@@ -3387,23 +3387,21 @@ async function loadAggPanel(prefix) {
   const lat = data.aggregated[data.aggregated.length-1];
   const setEl = (id,val)=>{const el=document.getElementById(id);if(el)el.textContent=val;};
 
-  // Try Firestore index first — updated on every snapshot write
+  // Try Firestore index first (agg_ fields = true aggregate across all events)
   const idxData = await loadAggIndex(prefix);
-  if (idxData && idxData.latest_floor > 0) {
-    setEl(prefix+'-f', fmt(idxData.latest_floor));
-    setEl(prefix+'-a', fmt(idxData.latest_avg));
-    setEl(prefix+'-m', fmt(idxData.latest_median));
-    setEl(prefix+'-x', fmt(idxData.latest_max));
-    setEl(prefix+'-c', fmtC(idxData.latest_count));
+  if (idxData && idxData.agg_floor > 0) {
+    setEl(prefix+'-f', fmt(idxData.agg_floor));
+    setEl(prefix+'-a', fmt(idxData.agg_avg));
+    setEl(prefix+'-m', fmt(idxData.agg_median));
+    setEl(prefix+'-x', fmt(idxData.agg_max));
+    setEl(prefix+'-c', fmtC(idxData.agg_count));
     const ce=document.getElementById(prefix+'-event-count');
     if(ce) {
-      const evCount = prefix==='perf'
-        ? (idxData.home_event_count||0)+' home event'+((idxData.home_event_count||0)!==1?'s':'')
-        : (idxData.event_count||0)+' event'+((idxData.event_count||0)!==1?'s':'');
-      ce.textContent = evCount + (idxData.rolling_floor ? ' · rolling floor '+fmt(idxData.rolling_floor) : '');
+      const n = prefix==='perf' ? (idxData.home_event_count||0) : (idxData.event_count||0);
+      ce.textContent = n+' event'+(n!==1?'s':'');
     }
   } else {
-    // Fall back to client-side aggregation
+    // Fall back to client-side aggregation from history
     setEl(prefix+'-f', fmt(lat.floor));
     setEl(prefix+'-a', fmt(lat.avg));
     setEl(prefix+'-m', fmt(lat.median));

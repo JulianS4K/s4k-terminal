@@ -152,11 +152,11 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   display:grid;grid-template-columns:repeat(5,1fr);
   border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg2);
 }
-.metric{padding:14px 16px;border-right:1px solid var(--border);transition:background 0.1s;}
+.metric{padding:8px 12px;border-right:1px solid var(--border);transition:background 0.1s;}
 .metric:last-child{border-right:none;}
 .metric:hover{background:rgba(255,255,255,0.02);}
-.metric-lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:500;}
-.metric-val{font-size:22px;font-weight:600;margin-top:4px;font-family:var(--font);}
+.metric-lbl{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:500;}
+.metric-val{font-size:18px;font-weight:600;margin-top:2px;font-family:var(--font);}
 .metric-delta{font-size:11px;margin-top:3px;min-height:16px;font-family:var(--font);}
 .metric-src{font-size:9px;font-weight:600;padding:1px 6px;border-radius:999px;margin-left:6px;vertical-align:middle;}
 .metric-src.tevo-live{background:var(--green-dim);color:var(--green);}
@@ -170,7 +170,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 .row-lbl.owned-lbl-r{color:var(--blue);opacity:.85;}
 .metrics-row .metric{font-size:11px;border-right:1px solid var(--border);}
 .metrics-row .metric:last-child{border-right:none;}
-.metric-val.owned{font-size:20px;color:var(--blue);}
+.metric-val.owned{font-size:18px;color:var(--blue);}
 .owned-none{padding:8px 16px;font-size:11px;color:var(--muted);font-style:italic;}
 .parking-tog{display:flex;align-items:center;gap:8px;padding:5px 16px;border-top:1px solid var(--border);flex-shrink:0;background:var(--bg2);}
 .margin-badge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:999px;margin-left:auto;}
@@ -401,6 +401,10 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 .sc-floor{font-size:12px;font-weight:700;color:var(--white);font-family:var(--font);}
 .sc-qty{font-size:9px;color:var(--muted);}
 .sig-pill{font-size:10px;padding:2px 9px;border-radius:999px;background:rgba(255,255,255,.06);color:var(--text2);border:1px solid var(--border);}
+.w-tab{font-size:10px;font-weight:500;padding:3px 9px;border-radius:var(--r3);cursor:pointer;
+  color:var(--muted);background:rgba(255,255,255,0.04);border:1px solid var(--border);transition:all 0.15s;}
+.w-tab:hover{color:var(--text2);background:rgba(255,255,255,0.08);}
+.w-tab.active{background:var(--bg4);color:var(--white);border-color:var(--border2);}
 .exp-pill{padding:3px 10px;border-radius:999px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:10px;cursor:pointer;font-family:var(--font);}
 .exp-pill:hover{border-color:var(--teal);color:var(--teal);}
 .exp-pill.active{background:var(--teal);border-color:var(--teal);color:var(--bg);font-weight:700;}
@@ -633,6 +637,14 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
             <div class="c-tog" onclick="togS('avg',this)" id="tog-a">Avg</div>
             <div class="c-tog" onclick="togS('max',this)" id="tog-x">Max</div>
           </div>
+          <!-- Data window filter -->
+          <div style="display:flex;gap:3px;margin-left:8px;" id="window-tabs">
+            <div class="w-tab active" onclick="setWindow('24h',this)" id="wtab-24h">24h</div>
+            <div class="w-tab" onclick="setWindow('3d',this)"  id="wtab-3d">3d</div>
+            <div class="w-tab" onclick="setWindow('7d',this)"  id="wtab-7d">7d</div>
+            <div class="w-tab" onclick="setWindow('1m',this)"  id="wtab-1m">1m</div>
+            <div class="w-tab" onclick="setWindow('all',this)" id="wtab-all">All</div>
+          </div>
           <span id="c-lbl" style="font-size:11px;color:var(--muted);margin-left:auto;">FLOOR — per snapshot</span>
         </div>
         <div class="chart-canvas-wrap">
@@ -862,6 +874,7 @@ const APP_VERSION = 'Alpha 2.0';
 let tracked = {}, selKey = null;
 let chart = null, cmode = 'price';
 let son = {floor:true, med:false, avg:false, max:false};
+let chartWindow = '24h'; // active data window
 let xFeedItems = [], espnFeedItems = [], feedItems = [], lastFeedLoad = 0;
 let eventFeedMap = {};
 let lfilt = 'matched', sfilt = null;
@@ -1858,6 +1871,29 @@ function togS(s,el) {
   if(lbl) lbl.textContent=(active.length?active.join(' · '):'(select series)')+' — per snapshot';
 }
 
+function setWindow(w, el) {
+  chartWindow = w;
+  document.querySelectorAll('.w-tab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  if (selKey) renderChart(tracked[selKey]);
+}
+
+function filterByWindow(history) {
+  if (!chartWindow || chartWindow === 'all') return history;
+  const now = Date.now();
+  const ms = {
+    '24h': 24 * 3600 * 1000,
+    '3d':   3 * 86400 * 1000,
+    '7d':   7 * 86400 * 1000,
+    '1m':  30 * 86400 * 1000
+  }[chartWindow] || null;
+  if (!ms) return history;
+  const cutoff = now - ms;
+  const filtered = history.filter(s => new Date(s.ts).getTime() >= cutoff);
+  // If window is narrower than data, use it; otherwise show all
+  return filtered.length >= 2 ? filtered : history;
+}
+
 function switchMode(mode,el) {
   cmode=mode;
   document.querySelectorAll('.c-tab').forEach(t=>t.classList.remove('active'));
@@ -1880,7 +1916,7 @@ function _renderChartNow(r) {
   const canvas=document.getElementById('main-ch');
   const empty=document.getElementById('empty-ch');
   if(!r) { canvas.style.display='none'; empty.style.display='flex'; return; }
-  const h=(r.history||[]).filter(s=>s.floor>0&&!isNaN(s.floor));
+  const h=filterByWindow((r.history||[]).filter(s=>s.floor>0&&!isNaN(s.floor)));
   if(!h.length) {
     canvas.style.display='none'; empty.style.display='flex';
     const sc=(r.history||[]).length;
@@ -2767,18 +2803,32 @@ async function saveSGEventId() {
   try {
     const d = await gasPost({action:'save_sg_mapping', tevo_id:tevoId, sg_id:sgId});
     if (d.ok) {
-      if (status) { status.textContent = 'mapped ✓'; status.style.color = 'var(--green)'; }
-      // Store locally and trigger a SG fetch
+      if (status) { status.textContent = 'saved — fetching…'; status.style.color = 'var(--yellow)'; }
       if (!tracked[selKey]._sg) tracked[selKey]._sg = {};
       tracked[selKey]._sg.sg_event_id = sgId;
       toast(`SeatGeek mapped: ${tracked[selKey].name}`);
-      // Trigger fetch immediately via GAS
-      gasPost({action:'fetch_sg_now', tevo_id:tevoId, sg_id:sgId}).catch(()=>{});
+      // Fetch SG data — separate call so save doesn't timeout on large responses
+      try {
+        const r = await gasPost({action:'fetch_sg_now', tevo_id:tevoId, sg_id:sgId});
+        if (r.ok) {
+          if (status) { status.textContent = `mapped ✓ · ${fmtC(r.count)} listings`; status.style.color='var(--green)'; }
+          // Reload SG data into panel
+          await loadSGData(selKey);
+          renderDetail(selKey);
+        } else {
+          if (status) { status.textContent = `fetch error: ${r.error||'unknown'}`; status.style.color='var(--red)'; }
+          toast('SG fetch error: ' + (r.error||'unknown'), 'err');
+        }
+      } catch(fetchErr) {
+        if (status) { status.textContent = 'fetch failed'; status.style.color='var(--red)'; }
+        toast('SG fetch failed: ' + fetchErr.message, 'err');
+      }
     } else {
-      if (status) { status.textContent = 'error'; status.style.color = 'var(--red)'; }
+      if (status) { status.textContent = `error: ${d.error||'unknown'}`; status.style.color = 'var(--red)'; }
     }
   } catch(e) {
-    if (status) { status.textContent = 'failed'; status.style.color = 'var(--red)'; }
+    if (status) { status.textContent = 'failed: '+e.message; status.style.color = 'var(--red)'; }
+    toast('SG mapping failed: '+e.message, 'err');
   }
 }
 

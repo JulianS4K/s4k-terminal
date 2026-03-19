@@ -1174,9 +1174,11 @@ const FS = (() => {
 
   // Connection test — reads the ping doc
   async function testConnection() {
+    // Just fetch a token — no Firestore read needed to confirm connectivity.
+    // The old _connection_test/ping write was burning a quota read on every test.
     try {
-      const doc = await getDoc('_connection_test', 'ping');
-      return {ok: !!doc, doc};
+      const token = await getToken();
+      return {ok: !!token};
     } catch(e) {
       return {ok: false, error: e.message};
     }
@@ -1213,19 +1215,18 @@ async function testFirestore() {
   const box = document.getElementById('conn-box');
   box.style.display='block'; box.className='conn-result'; box.textContent='Testing Firestore...';
   try {
-    const result = await FS.testConnection();
-    if (result.ok) {
-      // Stagger reads — avoid simultaneous burst hitting rate limit
-      const snaps = await FS.query('tevo',[],[{field:'snapshot_ts',dir:'DESCENDING'}],3);
-      await new Promise(r=>setTimeout(r,300));
-      const feeds = await FS.query('feed_items',[],[{field:'received_ts',dir:'DESCENDING'}],3);
-      box.className='conn-result ok';
-      box.textContent=`Firestore connected · tevo/${snaps.length} recent · feed_items/${feeds.length} recent`;
-    } else {
-      box.className='conn-result err';
-      box.textContent='Firestore failed: '+(result.error||'unknown');
-    }
-  } catch(e) { box.className='conn-result err'; box.textContent='Error: '+e.message; }
+    // Token fetch confirms auth works — no wasted reads on _connection_test
+    const token = await FS.getToken();
+    if (!token) throw new Error('Could not get token');
+    // One lightweight read — event_index already has docs, no wasted write
+    const idx = await FS.query('event_index',[{field:'tracked',op:'EQUAL',value:true}],[],3);
+    const tevo = await FS.query('tevo',[],[{field:'snapshot_ts',dir:'DESCENDING'}],1);
+    box.className='conn-result ok';
+    box.textContent=`Firestore connected · ${idx.length} tracked events · ${tevo.length ? 'snapshots flowing' : 'no snapshots yet'}`;
+  } catch(e) {
+    box.className='conn-result err';
+    box.textContent='Firestore failed: '+e.message;
+  }
 }
 
 // ── Portfolio ───────────────────────────────────────────────────
@@ -2850,7 +2851,7 @@ async function init() {
   // Pre-warm GAS (fire and forget — no await, just wakes the cold start)
   gasGet({action:'ping'}).catch(()=>{});
 
-  // Get Firestore token first, then load tracked — sequential to avoid burst
+  // Pre-fetch Firestore token only — no reads, just JWT generation via GAS
   try { await FS.getToken(); } catch(e) {}
 
   await loadTracked();

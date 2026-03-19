@@ -444,7 +444,7 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   <div class="topbar-right">
     <span id="st-bar"></span>
     <span id="clock"></span>
-    <span class="ver-pill" id="ver-badge">Alpha 2.0</span>
+    <span class="ver-pill" id="ver-badge">Alpha 3.3</span>
   </div>
 </div>
 
@@ -465,6 +465,12 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
   </div>
   <div class="tab" onclick="showPanel('settings',this)" id="tab-settings">
     <span class="fk">F4</span>Settings
+  </div>
+  <div class="tab" onclick="showPanel('performer',this);loadAggPanel('perf')" id="tab-performer">
+    <span class="fk">F6</span>Performer
+  </div>
+  <div class="tab" onclick="showPanel('venue',this);loadAggPanel('venue')" id="tab-venue">
+    <span class="fk">F7</span>Venue
   </div>
   <div class="nav-right">
     <button class="refresh-btn" onclick="refreshAll(this)" id="btn-refresh">↺ Refresh</button>
@@ -881,13 +887,13 @@ const CKEY = 's4k_a30';
 //            4-tier cadence, auto-update dual-layer, Matched ★ tab
 // Alpha 3.1  Composite index query, orderBy server-side, limit 500,
 //            poll last_updated fallback, SSE parking sanity filter
-// Alpha 2.0  DbClient · fsBatchWrite · SQL flat schema · zone foundation · F5 Explorer
+// Alpha 3.3  DbClient · fsBatchWrite · SQL flat schema · zone foundation · F5 Explorer
 // Alpha 3.3  Schema v3: flat tevo/ docs, unified feed_items, price_slots map
 // Alpha 3.2  Remove manual refresh → auto-update timer, SSE filter,
 //            chart debounce, token cache, session error state,
 //            sanity filter tightened, blank feed card fix, ET timezone
 // ================================================================
-const APP_VERSION = 'Alpha 2.0';
+const APP_VERSION = 'Alpha 3.3';
 
 // Migrate GAS URL from previous versions
 (function migrate() {
@@ -1237,9 +1243,11 @@ const FS = (() => {
     // Composite index tevo(event_id ASC, snapshot_ts DESC) — server-side order works.
     // Limit 500: at 15-min cadence that's ~5 days of history, plenty for the chart.
     // Returns newest first (DESCENDING) — loadHistory sorts ASC for chart rendering.
+    // No orderBy — sort client-side to avoid composite index requirement
+    // loadHistory already sorts ASC for chart rendering
     return query('tevo',
       [{field:'event_id', op:'EQUAL', value:String(eventId)}],
-      [{field:'snapshot_ts', dir:'DESCENDING'}],
+      [],
       limit
     );
   }

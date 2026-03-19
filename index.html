@@ -1417,7 +1417,7 @@ async function loadHistory(key) {
               count: oc,
               qty:   Number(s.owned_qty||0),
               stats: oc > 0 ? {
-                retail:    {floor:Number(s.owned_floor||0), avg:Number(s.owned_avg||0)},
+                retail:    {floor:Number(s.owned_floor||0), avg:Number(s.owned_avg||0), median:Number(s.owned_median||0), max:Number(s.owned_max||0)},
                 wholesale: {floor:Number(s.owned_ws_floor||0)},
                 qty: Number(s.owned_qty||0), groups: oc,
                 vs_market_floor: Number(s.owned_vs_mkt||0)
@@ -2580,7 +2580,7 @@ async function listenToTevo(token,pid) {
             split_1_pct:       Number(snap.split_1_pct ||0),
             owned: _oc > 0 ? {
               count:_oc, qty:Number(snap.owned_qty||0),
-              stats:{retail:{floor:Number(snap.owned_floor||0),avg:Number(snap.owned_avg||0)},
+              stats:{retail:{floor:Number(snap.owned_floor||0),avg:Number(snap.owned_avg||0),median:Number(snap.owned_median||0),max:Number(snap.owned_max||0)},
                      wholesale:{floor:Number(snap.owned_ws_floor||0)},
                      qty:snap.owned_qty, groups:_oc, vs_market_floor:Number(snap.owned_vs_mkt||0)}
             } : (ev.history?.slice(-1)[0]?.owned||{count:0,stats:null}),

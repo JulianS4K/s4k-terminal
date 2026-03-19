@@ -3263,6 +3263,7 @@ function buildAggData(prefix) {
   const matchKey  = prefix==='perf' ? 'performer_id' : 'venue_id';
   const matchVal  = prefix==='perf' ? sel.performer_id : sel.venue_id;
   const matchName = prefix==='perf' ? (sel.performer||'') : (sel.venue||'');
+  console.log('[buildAggData]', prefix, '— matchKey:', matchKey, 'matchVal:', matchVal, 'matchName:', matchName, 'event:', sel.name);
 
   // Match by ID first, fall back to name if ID empty
   let relEvents = [];

@@ -1169,7 +1169,8 @@ const FS = (() => {
       filters.push({field:'matched', op:'EQUAL', value:true});
     }
     filters.push({field:'source', op:'EQUAL', value:'espn'});
-    return query('feed_items', filters, [{field:'received_ts', dir:'DESCENDING'}], limit);
+    // No orderBy — composite index not set up, sort client-side
+    return query('feed_items', filters, [], limit);
   }
 
   // Connection test — reads the ping doc
@@ -2227,7 +2228,9 @@ async function loadFeed(silent=false) {
 
 async function loadXItems() {
   try {
-    const docs=await FS.getFeedItems({limit:300});
+    // Query all non-system feed items — no orderBy to avoid composite index requirement
+    // Sorted client-side in mergeAndMap by pubDate
+    const docs=await FS.query('feed_items',[],[],300);
     // Filter out internal system items (price alerts, briefs)
     return docs
       .filter(d => !['price_alert','refresh_brief','alert','rss_match','espn'].includes(d.source||''))
@@ -2279,9 +2282,10 @@ async function loadXItems() {
 async function loadEspnItems() {
   try {
     // Schema v3: ESPN in feed_items/ with source='espn'
+    // No orderBy — composite index not created yet, sort client-side
     const docs=await FS.query('feed_items',
       [{field:'source',op:'EQUAL',value:'espn'}],
-      [{field:'received_ts',dir:'DESCENDING'}],300);
+      [],300);
     return (docs||[]).map(d=>{
       const league=(d.feed_league||'General');
       return {

@@ -2247,8 +2247,16 @@ async function loadXItems() {
     const docs=await FS.query('feed_items',[],[],300);
     // Filter out internal system items (price alerts, briefs)
     return docs
-      .filter(d => !['price_alert','refresh_brief','alert','rss_match','espn'].includes(d.source||''))
-      .filter(d => !!(d.post_text || d.title)) // drop blank cards (no source field = pre-schema items)
+      .filter(d => {
+        const src = d.source||'';
+        // Exclude all internal system items
+        if (['price_alert','refresh_brief','alert','rss_match','espn','system'].includes(src)) return false;
+        // Exclude items with portfolio/system category
+        if (['portfolio','system','refresh'].includes((d.category||'').toLowerCase())) return false;
+        // Must have actual text content
+        if (!d.post_text && !d.title) return false;
+        return true;
+      })
       .map(d=>{
         // fsWriteRssItem schema: league field, post_text, post_url, posted_at
         const league = d.league||d.feed_league||d.attr_league||'General';

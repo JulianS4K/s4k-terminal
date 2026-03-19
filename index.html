@@ -396,6 +396,25 @@ html,body{height:100%;background:var(--bg);color:var(--white);font-family:var(--
 /* ── Blink ── */
 .blink{animation:blink 1s step-end infinite;}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+.sec-chip{display:flex;flex-direction:column;align-items:center;padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;min-width:52px;cursor:default;}
+.sc-name{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+.sc-floor{font-size:12px;font-weight:700;color:var(--white);font-family:var(--font);}
+.sc-qty{font-size:9px;color:var(--muted);}
+.sig-pill{font-size:10px;padding:2px 9px;border-radius:999px;background:rgba(255,255,255,.06);color:var(--text2);border:1px solid var(--border);}
+.exp-pill{padding:3px 10px;border-radius:999px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:10px;cursor:pointer;font-family:var(--font);}
+.exp-pill:hover{border-color:var(--teal);color:var(--teal);}
+.exp-pill.active{background:var(--teal);border-color:var(--teal);color:var(--bg);font-weight:700;}
+.exp-select{background:var(--bg2);border:1px solid var(--border);color:var(--text2);font-size:11px;padding:3px 8px;border-radius:4px;font-family:var(--font);}
+.exp-card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:12px;display:flex;flex-direction:column;gap:5px;transition:border-color .15s;}
+.exp-card:hover{border-color:var(--teal);}
+.ec-title{font-size:12px;font-weight:700;color:var(--white);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ec-sub{font-size:10px;color:var(--muted);}
+.ec-metrics{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:2px;}
+.ec-m{background:var(--bg);border-radius:3px;padding:4px 6px;}
+.ec-ml{font-size:9px;color:var(--muted);text-transform:uppercase;}
+.ec-mv{font-size:13px;font-weight:700;font-family:var(--font);color:var(--white);}
+.ec-prem{font-size:13px;font-weight:700;font-family:var(--font);}
+.ec-prem.pos{color:var(--green);}.ec-prem.neg{color:var(--red);}.ec-prem.neu{color:var(--yellow);}
 </style>
 </head>
 <body>

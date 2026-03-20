@@ -952,8 +952,13 @@ function startUpdateTimer(eventId) {
     try {
       const idx = await FS.getEventIndex(eventId);
       if (!idx) { el.textContent = '—'; return; }
+      const lastTs = idx.last_snapshot_ts || idx.last_updated || '';
       if (!lastTs) { el.textContent = '—'; return; }
-      const winMins = _timerWinMins;
+      // Compute window from event's days-until
+      const ev = Object.values(tracked).find(e=>String(e.event_id)===String(eventId));
+      const evDate = ev?.occurs_at_local || ev?.date || '';
+      const daysOut = evDate ? Math.max(0,(new Date(evDate)-Date.now())/864e5) : 999;
+      const winMins = daysOut<1?15:daysOut<=2?30:daysOut<=7?60:1440;
       const nextMs    = new Date(lastTs).getTime() + winMins * 60 * 1000;
       const secsLeft  = Math.max(0, Math.round((nextMs - Date.now()) / 1000));
       if (secsLeft === 0) {
@@ -1474,6 +1479,7 @@ async function loadTracked() {
     loadAllHistories().then(() => {
       renderSidebar(); setSt('Ready');
       startRealtimeListener();
+      renderPerformerTiles(''); // pre-render F6 tiles
       // Catch-up poll after histories loaded — guarded so it never double-fires
       let _catchupFired = false;
       setTimeout(async () => {
@@ -2744,6 +2750,7 @@ async function startRealtimeListener() {
           // for event_index docs written before last_snapshot_ts was added
           const fsTs  = idx?.last_snapshot_ts || idx?.last_updated || '';
           const memTs = (ev.history||[]).slice(-1)[0]?.ts || '';
+          console.log('[poll]', ev.name?.substring(0,20), 'fsTs:', fsTs?.substring(0,16), 'memTs:', memTs?.substring(0,16), 'new:', fsTs>memTs);
           if (fsTs && fsTs > memTs) {
             await loadHistory(key);
             anyNew = true;
@@ -3319,28 +3326,44 @@ function buildAggData(prefix) {
   // Use only events with history for chart
   relEvents = eventsWithHistory;
 
-  const allTs = [...new Set(
-    relEvents.flatMap(ev=>(ev.history||[]).map(s=>s.ts))
-  )].sort();
+  // Aggregate strategy: for each event take its LATEST snapshot,
+  // then group by 30-min bucket across events.
+  // This avoids the ±2h duplication problem where all events refresh
+  // in the same 12s window and every timestamp matches every other.
+  const bucketMs = 30 * 60 * 1000; // 30-min buckets
 
-  const aggregated = allTs.map(ts => {
-    const tsMs = new Date(ts).getTime();
-    const snaps = relEvents.flatMap(ev =>
-      (ev.history||[]).filter(s=>Math.abs(new Date(s.ts).getTime()-tsMs)<2*3600*1000)
-    );
-    if (!snaps.length) return null;
-    const avg = arr => arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0;
-    const floors = snaps.map(s=>s.floor).filter(v=>v>0);
-    const maxes  = snaps.map(s=>s.max).filter(v=>v>0);
-    return {
-      ts,
-      floor:  floors.length ? Math.min(...floors) : 0,
-      avg:    avg(snaps.map(s=>s.avg).filter(v=>v>0)),
-      median: avg(snaps.map(s=>s.median).filter(v=>v>0)),
-      max:    maxes.length  ? Math.max(...maxes)  : 0,
-      count:  snaps.reduce((a,s)=>a+(s.count||0),0)
-    };
-  }).filter(Boolean);
+  // Build map: bucket_key → [snaps from different events]
+  const buckets = {};
+  relEvents.forEach(ev => {
+    (ev.history||[]).filter(s=>s.floor>0).forEach(s => {
+      const bk = Math.floor(new Date(s.ts).getTime() / bucketMs) * bucketMs;
+      if (!buckets[bk]) buckets[bk] = {};
+      const eid = String(ev.event_id);
+      // Keep only the latest snap per event per bucket
+      if (!buckets[bk][eid] || s.ts > buckets[bk][eid].ts) {
+        buckets[bk][eid] = s;
+      }
+    });
+  });
+
+  const avgArr = arr => arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0;
+
+  const aggregated = Object.entries(buckets)
+    .sort((a,b)=>Number(a[0])-Number(b[0]))
+    .map(([bk, evSnaps]) => {
+      const snaps = Object.values(evSnaps);
+      if (!snaps.length) return null;
+      const floors = snaps.map(s=>s.floor).filter(v=>v>0);
+      const maxes  = snaps.map(s=>s.max).filter(v=>v>0);
+      return {
+        ts:     new Date(Number(bk)).toISOString(),
+        floor:  floors.length ? Math.min(...floors) : 0,
+        avg:    avgArr(snaps.map(s=>s.avg).filter(v=>v>0)),
+        median: avgArr(snaps.map(s=>s.median).filter(v=>v>0)),
+        max:    maxes.length  ? Math.max(...maxes)  : 0,
+        count:  snaps.reduce((a,s)=>a+(s.count||0),0)
+      };
+    }).filter(Boolean);
 
   return {aggregated, relEvents, matchVal};
 }
